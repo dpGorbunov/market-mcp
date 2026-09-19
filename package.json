@@ -1,19 +1,30 @@
 {
-  "name": "ozon-mcp-server",
-  "version": "0.0.1",
-  "description": "MCP server for searching Ozon products and reading product details and reviews. A single long-lived headless Chromium passes Ozon's anti-bot challenge; data is fetched as JSON from Ozon's internal composer API.",
+  "name": "market-mcp",
+  "version": "0.1.0",
+  "description": "MCP server for Russian marketplaces: Ozon (search, details, reviews with worst-first sort), DNS (search, characteristics, reviews) and Yandex Market (search, card). One headed Chromium with a persistent profile passes anti-bot checks once.",
   "type": "module",
   "bin": {
-    "ozon-mcp-server": "src/index.js"
+    "market-mcp": "src/index.js"
   },
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
+    "test": "node test/parse.test.js && node test/parse_dns.test.js",
     "test:parse": "node test/parse.test.js"
   },
-  "keywords": ["mcp", "ozon", "marketplace", "search", "playwright"],
+  "keywords": [
+    "mcp",
+    "ozon",
+    "dns",
+    "yandex-market",
+    "marketplace",
+    "reviews",
+    "playwright"
+  ],
   "license": "MIT",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.6.1",
     "playwright": "1.60.0",

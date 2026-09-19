@@ -10,9 +10,9 @@
 ```json
 {
   "mcpServers": {
-    "ozon": {
-      "command": "docker",
-      "args": ["run", "-i", "--rm", "--init", "--shm-size=1g", "eduard256/ozon-mcp-server:latest"],
+    "market": {
+      "command": "node",
+      "args": ["/полный/путь/market-mcp/src/index.js"],
       "timeout": 30000,
       "trust": false
     }
@@ -25,5 +25,5 @@
 ## Через CLI
 
 ```bash
-gemini mcp add ozon -- docker run -i --rm --init --shm-size=1g eduard256/ozon-mcp-server:latest
+gemini mcp add ozon -- node /полный/путь/market-mcp/src/index.js
 ```

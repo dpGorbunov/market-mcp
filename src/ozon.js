@@ -45,10 +45,22 @@ export async function details({ product }) {
   return parseDetails(basePage, page2);
 }
 
-export async function reviews({ product, limit = 10 }) {
+const REVIEW_SORT = { newest: "published_at_desc", best: "score_desc", worst: "score_asc" };
+
+export async function reviews({ product, sort = "newest", page = 1, limit = 30 }) {
   const path = productPath(product);
-  const page = await fetchJson(`${path}reviews/`);
-  return parseReviews(page, limit);
+  const s = REVIEW_SORT[sort] || REVIEW_SORT.newest;
+  let query = `?sort=${s}`;
+  if (page > 1) {
+    // страницы дальше первой требуют page_key из ссылок пагинации первой страницы
+    const raw = await fetchJson(`${path}reviews/${query}`);
+    const key = Object.keys(raw.widgetStates || {}).find((k) => k.startsWith("webListReviews"));
+    const links = key ? JSON.parse(raw.widgetStates[key]).paging?.links || [] : [];
+    const link = links.find((l) => String(l.text) === String(page));
+    query = link?.urlParams || `?page=${page}&sort=${s}`;
+  }
+  const data = await fetchJson(`${path}reviews/${query}`);
+  return { sort, page, ...parseReviews(data, limit) };
 }
 
 export const _internal = { productPath };

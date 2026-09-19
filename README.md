@@ -1,68 +1,56 @@
-<p align="center">
-  <img src="https://raw.githubusercontent.com/eduard256/ozon-mcp-server/assets/img/ozon-mcp-logo.webp" alt="OZON MCP" width="420">
-</p>
+# market-mcp
 
-<p align="center">
-  <img src="https://raw.githubusercontent.com/eduard256/ozon-mcp-server/assets/img/ozon-card.webp" alt="Ozon MCP — search, details, reviews" width="100%">
-</p>
+MCP-сервер для российских площадок: **Ozon**, **DNS** и **Яндекс.Маркет**. Даёт агенту готовые инструменты поиска, характеристик и отзывов вместо голого браузера. Только чтение, без логина, корзины и оплаты.
 
-# Ozon MCP Server
+Форк [eduard256/ozon-mcp-server](https://github.com/eduard256/ozon-mcp-server). Что изменено относительно оригинала:
 
-MCP-сервер для поиска товаров на Ozon (ozon.ru). Даёт ИИ три инструмента: искать товары, читать карточку и читать отзывы.
-
-Публичного API для покупателей у Ozon нет, а сайт закрыт антиботом Variti. Поэтому сервер держит один headless-браузер Chromium, который проходит проверку один раз, а дальше забирает данные JSON-ом из внутреннего `composer-api` прямо со страницы. HTML не парсится — данные приходят структурированными.
+- Один Chromium **с окном** и **постоянным профилем** (`~/.market-mcp/profile`). Оригинал стартовал headless с чужим User-Agent и чистым профилем, за что Ozon отдавал капчу вместо JS-проверки. Теперь проверка проходится один раз, cookies живут между запусками; если всё же показана капча, окно ждёт, пока её решит человек (`MARKET_CAPTCHA_WAIT_S`, по умолчанию 120 с).
+- Отзывы Ozon: сортировка `worst` / `best` / `newest`, страницы по 30, распределение оценок 5..1.
+- Добавлены DNS (поиск, полные характеристики, отзывы с оценками по критериям) и Яндекс.Маркет (поиск с ценами, карточка предложения).
 
 ## Инструменты
 
-1. **ozon_search** — поиск товаров. Возвращает название, цену (в рублях, числом), старую цену, скидку, рейтинг, число отзывов, бренд, картинку и чистую ссылку.
-2. **ozon_product_details** — карточка товара по SKU, ссылке или slug. Цена (с картой / без карты / старая), наличие, рейтинг, продавец, фото, характеристики, описание.
-3. **ozon_product_reviews** — отзывы покупателей: текст, оценка, плюсы, минусы, дата.
+| Инструмент | Что возвращает |
+|---|---|
+| `ozon_search` (query, sort, priceMin, priceMax, limit) | товары: название, цена, старая цена, скидка, рейтинг, число отзывов, бренд, URL |
+| `ozon_product_details` (product) | цена с картой/без, наличие, продавец, характеристики, описание |
+| `ozon_product_reviews` (product, sort, page, limit) | отзывы: оценка, текст, плюсы, минусы, дата, «купил», фото; распределение по звёздам; пагинация |
+| `dns_search` (query, limit) | товары DNS: название, цена, рейтинг, число отзывов, URL; `nothingFound` если точного совпадения нет |
+| `dns_product` (product) | полные характеристики по группам, цена, рейтинг |
+| `dns_reviews` (product, limit) | отзывы DNS: общая оценка и оценки по критериям, срок использования, плюсы, минусы, комментарий; распределение по звёздам |
+| `yandex_search` (query, limit) | предложения Маркета: название, цена, зачёркнутая цена, рейтинг товара, короткие характеристики, URL |
+| `yandex_card` (product) | карточка предложения: цена, число предложений, рейтинг продавца, характеристики |
 
-## Запуск через Docker
+Данные Ozon берутся из внутреннего composer-api (JSON, 0.3-1 с на запрос после первого прохода антибота). DNS и Маркет читаются с отрендеренных страниц из того же браузера. Отзывы уровня модели на Маркете с карточек продавцов недоступны, за отзывами идти в `ozon_product_reviews` и `dns_reviews`.
 
-Образ опубликован в Docker Hub.
+## Установка
 
-```bash
-docker run -i --rm --init --shm-size=1g eduard256/ozon-mcp-server:latest
-```
-
-Флаги обязательны: `-i` — stdin для stdio, `--init` — корректное завершение Chromium, `--shm-size=1g` — память для браузера.
-
-## Установка в ваш клиент
-
-Инструкция под каждую систему — отдельным файлом:
-
-- [Claude Code](docs/CLAUDECODE-install.md)
-- [Claude Desktop](docs/CLAUDE-install.md)
-- [OpenAI Codex CLI](docs/CODEX-install.md)
-- [Cursor](docs/CURSOR-install.md)
-- [Windsurf](docs/WINDSURF-install.md)
-- [VS Code (Copilot)](docs/VSCODE-install.md)
-- [Cline](docs/CLINE-install.md)
-- [Continue.dev](docs/CONTINUE-install.md)
-- [Zed](docs/ZED-install.md)
-- [JetBrains AI Assistant](docs/JETBRAINS-install.md)
-- [Junie](docs/JUNIE-install.md)
-- [Gemini CLI](docs/GEMINI-install.md)
-
-## Как это работает
-
-- `src/browser.js` — один Chromium. Проходит антибот на главной странице и держит её открытой; все `fetch` идут с неё. При HTTP 403/307 (сессия протухла) или падении браузера перезапускается сам. Через 10 минут простоя браузер закрывается, чтобы освободить память.
-- `src/parse.js` — чистые парсеры JSON из `composer-api` (`widgetStates`). Без сети.
-- `src/ozon.js` — строит пути API, забирает данные, парсит.
-- `src/index.js` — MCP-сервер по stdio. Логи идут только в stderr (stdout занят протоколом JSON-RPC).
-
-**Важно:**
-
-1. Нельзя блокировать загрузку картинок, шрифтов и стилей — антибот грузит свои скрипты через них. Заблокируешь — Ozon вернёт 403.
-2. `fetch` должен идти со страницы на домене ozon.ru, а не с пустой — иначе CORS и 403.
-3. Первый запрос платит за прохождение антибота (~12 секунд). Дальше — 0.3–1 секунда.
-
-## Локальная разработка
+Нужны Node 20+ и Chromium для Playwright.
 
 ```bash
-npm install
-npx playwright install chromium
-node src/index.js          # MCP-сервер по stdio
-npm run test:parse         # офлайн-тесты парсеров на samples/
+git clone https://github.com/dpGorbunov/market-mcp.git
+cd market-mcp && npm install && npx playwright install chromium
+claude mcp add market --scope user -- node /полный/путь/market-mcp/src/index.js
 ```
+
+Другие клиенты (Claude Desktop, Cursor, Codex и т.д.): команда `node src/index.js` по stdio, см. `docs/`.
+
+Docker-образ оригинала собран только под amd64 и не проходит антибот (headless), поэтому здесь не используется.
+
+## Переменные окружения
+
+| Переменная | По умолчанию | Смысл |
+|---|---|---|
+| `MARKET_PROFILE_DIR` | `~/.market-mcp/profile` | профиль Chromium (cookies) |
+| `MARKET_HEADLESS` | `false` | `true` - без окна (Ozon/DNS в этом режиме выдают капчу) |
+| `MARKET_CAPTCHA_WAIT_S` | `120` | сколько ждать ручного решения капчи |
+| `MARKET_IDLE_MIN` | `10` | через сколько минут простоя закрыть браузер |
+
+## Разработка
+
+```bash
+npm test                  # офлайн-тесты парсеров на samples/
+node scripts/probe.mjs    # живая проверка всех площадок (открывает окно браузера)
+```
+
+`src/browser.js` - браузер и антибот, `src/ozon.js` + `src/parse.js` - Ozon, `src/dns.js` + `src/parse_dns.js` - DNS, `src/yandex.js` - Маркет, `src/index.js` - регистрация инструментов. Логи только в stderr, stdout занят JSON-RPC.

@@ -12,8 +12,8 @@
 ```json
 {
   "context_servers": {
-    "ozon": {
-      "command": "docker",
+    "market": {
+      "command": "node",
       "args": ["run", "--rm", "-i", "--init", "--shm-size=1g", "eduard256/ozon-mcp-server:latest"],
       "env": {}
     }

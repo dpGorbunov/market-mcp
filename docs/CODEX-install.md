@@ -11,15 +11,14 @@ Codex использует формат TOML, а не JSON. Это единст�
 
 ```toml
 [mcp_servers.ozon]
-command = "docker"
-args = ["run", "-i", "--rm", "--init", "--shm-size=1g", "eduard256/ozon-mcp-server:latest"]
-# startup_timeout_sec = 30   # поднимите, если docker долго тянет образ
+command = "node"
+args = ["/полный/путь/market-mcp/src/index.js"]
 ```
 
 ## Через CLI
 
 ```bash
-codex mcp add ozon -- docker run -i --rm --init --shm-size=1g eduard256/ozon-mcp-server:latest
+codex mcp add ozon -- node /полный/путь/market-mcp/src/index.js
 ```
 
 ## Проверка

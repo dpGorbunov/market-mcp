@@ -7,13 +7,13 @@
 Глобально (во всех проектах):
 
 ```bash
-claude mcp add ozon --scope user -- docker run -i --rm --init --shm-size=1g eduard256/ozon-mcp-server:latest
+claude mcp add market --scope user -- node /полный/путь/market-mcp/src/index.js
 ```
 
 Только в текущем проекте (запишется в `.mcp.json`, можно коммитить в git):
 
 ```bash
-claude mcp add ozon --scope project -- docker run -i --rm --init --shm-size=1g eduard256/ozon-mcp-server:latest
+claude mcp add market --scope project -- node /полный/путь/market-mcp/src/index.js
 ```
 
 ## Вручную через .mcp.json
@@ -23,9 +23,9 @@ claude mcp add ozon --scope project -- docker run -i --rm --init --shm-size=1g e
 ```json
 {
   "mcpServers": {
-    "ozon": {
-      "command": "docker",
-      "args": ["run", "-i", "--rm", "--init", "--shm-size=1g", "eduard256/ozon-mcp-server:latest"]
+    "market": {
+      "command": "node",
+      "args": ["/полный/путь/market-mcp/src/index.js"]
     }
   }
 }

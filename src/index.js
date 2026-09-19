@@ -6,6 +6,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { search, details, reviews } from "./ozon.js";
+import { dnsSearch, dnsProduct, dnsReviews } from "./dns.js";
+import { yandexSearch, yandexCard } from "./yandex.js";
 import { shutdown } from "./browser.js";
 
 const log = (...a) => console.error("[ozon-mcp]", ...a);
@@ -39,7 +41,7 @@ function tool(label, fn) {
   };
 }
 
-const server = new McpServer({ name: "ozon-mcp-server", version: "0.0.1" });
+const server = new McpServer({ name: "market-mcp", version: "0.1.0" });
 
 server.registerTool(
   "ozon_search",
@@ -89,18 +91,94 @@ server.registerTool(
     title: "Get Ozon product reviews",
     description:
       "Read real customer reviews for an Ozon product: author, score (1–5), comment, pros, cons, " +
-      "date, usefulness, whether the item was purchased, and whether photos are attached. " +
+      "date, usefulness, purchased flag, photos flag; plus the star distribution (5..1 counts) and paging. " +
       "Accepts an SKU, a full product URL, or a slug.",
     inputSchema: {
       product: z
         .string()
         .min(1)
         .describe('Product SKU (e.g. "1185261285"), full ozon.ru product URL, or product slug'),
-      limit: z.number().int().min(1).max(30).default(10).describe("Max number of reviews (1–30, default 10)"),
+      sort: z.enum(["newest", "best", "worst"]).default("newest").describe("newest (default), best (5 stars first), worst (1 star first) — read worst first to see real problems"),
+      page: z.number().int().min(1).max(50).default(1).describe("Page of 30 reviews"),
+      limit: z.number().int().min(1).max(30).default(30).describe("Max number of reviews from the page (1–30, default 30)"),
     },
     annotations: { readOnlyHint: true, openWorldHint: true, idempotentHint: true },
   },
   tool("ozon_product_reviews", reviews)
+);
+
+// ── DNS ─────────────────────────────────────────────────────────────────────────
+server.registerTool(
+  "dns_search",
+  {
+    title: "Search DNS (dns-shop.ru)",
+    description:
+      "Search electronics and appliances on DNS (dns-shop.ru): name, price (RUB), rating, review count and product URL. " +
+      "nothingFound=true means DNS has no exact match and returned similar items instead.",
+    inputSchema: {
+      query: z.string().min(1).describe('Search query, e.g. "Bosch PIB375FB1E" or "индукционная панель 30 см"'),
+      limit: z.number().int().min(1).max(30).default(12).describe("Max results (1–30, default 12)"),
+    },
+    annotations: { readOnlyHint: true, openWorldHint: true, idempotentHint: true },
+  },
+  tool("dns_search", dnsSearch)
+);
+
+server.registerTool(
+  "dns_product",
+  {
+    title: "Get DNS product characteristics",
+    description:
+      "Full technical characteristics of a DNS product (grouped, e.g. 'Конфорки / Диаметр конфорки'), price, rating and review count. " +
+      "Accepts the product URL from dns_search or the 16-hex product id.",
+    inputSchema: { product: z.string().min(1).describe("DNS product URL or 16-hex id") },
+    annotations: { readOnlyHint: true, openWorldHint: true, idempotentHint: true },
+  },
+  tool("dns_product", dnsProduct)
+);
+
+server.registerTool(
+  "dns_reviews",
+  {
+    title: "Get DNS product reviews",
+    description:
+      "Customer reviews from DNS: overall score, per-criterion scores (внешний вид, простота эксплуатации, ...), usage period, pros, cons, comment, date; " +
+      "plus the star distribution (5..1). Newest first.",
+    inputSchema: {
+      product: z.string().min(1).describe("DNS product URL or 16-hex id"),
+      limit: z.number().int().min(1).max(50).default(20).describe("Max reviews (1–50, default 20)"),
+    },
+    annotations: { readOnlyHint: true, openWorldHint: true, idempotentHint: true },
+  },
+  tool("dns_reviews", dnsReviews)
+);
+
+// ── Yandex Market ───────────────────────────────────────────────────────────────
+server.registerTool(
+  "yandex_search",
+  {
+    title: "Search Yandex Market",
+    description:
+      "Search offers on Yandex Market (market.yandex.ru): name, everyday price (RUB), struck-through old price, product rating, short specs and offer URL. " +
+      "Best source for 'what does it cost right now across sellers'. Seller cards carry no reviews: use ozon_product_reviews or dns_reviews for reviews.",
+    inputSchema: {
+      query: z.string().min(2).describe("Search query in Russian or model code"),
+      limit: z.number().int().min(1).max(30).default(12).describe("Max results (1–30, default 12)"),
+    },
+    annotations: { readOnlyHint: true, openWorldHint: true, idempotentHint: true },
+  },
+  tool("yandex_search", yandexSearch)
+);
+
+server.registerTool(
+  "yandex_card",
+  {
+    title: "Get Yandex Market offer card",
+    description: "Offer card on Yandex Market: price, number of offers from other sellers and the lowest one, seller rating, characteristics.",
+    inputSchema: { product: z.string().min(1).describe("Offer URL from yandex_search (market.yandex.ru/card/...)") },
+    annotations: { readOnlyHint: true, openWorldHint: true, idempotentHint: true },
+  },
+  tool("yandex_card", yandexCard)
 );
 
 // ── lifecycle ───────────────────────────────────────────────────────────────────

@@ -290,7 +290,13 @@ export function parseReviews(page, limit = 10) {
     };
   });
 
-  return { rating, totalReviews: total, count: reviews.length, reviews };
+  const scoreW = widget(page, "webReviewProductScore");
+  const distribution = Array.isArray(scoreW?.score)
+    ? Object.fromEntries(scoreW.score.map((x) => [String(x.title).match(/\d/)?.[0] ?? x.title, x.value]))
+    : null;
+  const paging = w?.paging ? { page: w.paging.page, perPage: w.paging.perPage, total: w.paging.total } : null;
+  const sortings = Array.isArray(w?.sortings) ? w.sortings.map((x) => x.value) : null;
+  return { rating, totalReviews: total, distribution, paging, sortings, count: reviews.length, reviews };
 }
 
 export const _internal = { priceToNumber, cleanUrl, skuFromUrl, widget };

@@ -12,9 +12,9 @@ Junie — отдельный агентный CLI от JetBrains, у него е
 ```json
 {
   "mcpServers": {
-    "ozon": {
-      "command": "docker",
-      "args": ["run", "-i", "--rm", "--init", "--shm-size=1g", "eduard256/ozon-mcp-server:latest"]
+    "market": {
+      "command": "node",
+      "args": ["/полный/путь/market-mcp/src/index.js"]
     }
   }
 }

@@ -1,137 +1,132 @@
-// Single long-lived headless Chromium that passes Ozon's anti-bot (Variti) challenge once
-// and is reused for the whole process. Requests are issued as fetch() to Ozon's internal
-// composer API from inside the page context — like an extension running in the open tab.
+// One long-lived Chromium with a persistent profile (~/.market-mcp/profile) shared by all
+// marketplaces. Headed by default: Ozon (Variti), DNS (Qrator) and Yandex (SmartCaptcha)
+// pass a visible browser but hand a headless one a real captcha. Cookies survive restarts,
+// so the anti-bot challenge is paid once. If a captcha still shows up, the window stays open
+// and we wait for the user to solve it (MARKET_CAPTCHA_WAIT_S, default 120).
 //
-// Design (per researched best practices):
-//  - lazy init: browser launches on first call, not at startup
-//  - one browser + one context for the process; cookies live in the context
-//  - page pool so concurrent fetches don't share window state
-//  - browser 'disconnected' -> null refs -> transparent relaunch on next call
-//  - context.route aborts images/fonts/media/css (we only need JS + JSON)
-//  - idle timer (unref'd) closes the browser to free RAM; relaunches on demand
+//  - lazy init on first call; context 'close' -> relaunch on next call
+//  - Ozon: fetch() to composer-api from a page that stays on ozon.ru (cookies + origin apply)
+//  - other sites: openPage() navigates a fresh tab and hands back a page for evaluate()
+//  - idle timer closes the browser after MARKET_IDLE_MIN (default 10) minutes
 //  - all logs go to stderr (stdout is the MCP JSON-RPC wire)
 
 import { chromium } from "playwright";
+import { homedir } from "os";
+import { join } from "path";
 
-const HOME = "https://www.ozon.ru/";
-const API = "https://www.ozon.ru/api/composer-api.bx/page/json/v2?url=";
-const CHALLENGE_WAIT_MS = 12000; // time for the JS challenge to set cookies on first load
-const IDLE_TIMEOUT_MS = 10 * 60 * 1000; // close browser after 10 min idle
+const OZON_HOME = "https://www.ozon.ru/";
+const OZON_API = "https://www.ozon.ru/api/composer-api.bx/page/json/v2?url=";
+const PROFILE = process.env.MARKET_PROFILE_DIR || join(homedir(), ".market-mcp", "profile");
+const HEADLESS = process.env.MARKET_HEADLESS === "true";
+const CAPTCHA_WAIT_MS = 1000 * Number(process.env.MARKET_CAPTCHA_WAIT_S || 120);
+const IDLE_TIMEOUT_MS = 60 * 1000 * Number(process.env.MARKET_IDLE_MIN || 10);
 const NAV_TIMEOUT_MS = 90000;
 
-const LAUNCH_ARGS = [
-  "--disable-blink-features=AutomationControlled",
-  "--no-sandbox",
-  "--disable-setuid-sandbox",
-  "--disable-dev-shm-usage",
-  "--disable-gpu",
-  "--mute-audio",
-  "--no-first-run",
-  "--no-default-browser-check",
-  "--disable-extensions",
-  "--disable-background-networking",
-];
-const USER_AGENT =
-  "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
+// Титулы страниц-заглушек антибота у всех площадок.
+const CHALLENGE = /antibot|доступ ограничен|нет соединения|captcha|проверка браузера|qrator|robot|attention required|access denied/i;
+
+const LAUNCH_ARGS = ["--disable-blink-features=AutomationControlled", "--no-first-run", "--no-default-browser-check", "--mute-audio"];
 
 const log = (...a) => console.error("[browser]", ...a);
 
-let browser = null;
 let context = null;
-let mainPage = null; // the page that passed the challenge; all fetches run from it (stays on ozon.ru)
+let ozonPage = null; // stays on ozon.ru, all composer fetches run from it
+let ozonReady = false;
 let initPromise = null;
-let challenged = false; // has the current context passed the challenge?
 let idleTimer = null;
 
 function resetIdle() {
   clearTimeout(idleTimer);
-  idleTimer = setTimeout(() => {
-    log("idle timeout — closing browser to free RAM");
-    shutdown().catch(() => {});
-  }, IDLE_TIMEOUT_MS);
-  idleTimer.unref(); // never keep the process alive just for this timer
+  idleTimer = setTimeout(() => shutdown().catch(() => {}), IDLE_TIMEOUT_MS);
+  idleTimer.unref?.();
 }
 
 async function launch() {
-  log("launching Chromium…");
-  browser = await chromium.launch({ headless: true, args: LAUNCH_ARGS });
-  browser.on("disconnected", () => {
-    log("disconnected — will relaunch on next request");
-    browser = null;
-    context = null;
-    mainPage = null;
-    challenged = false;
-  });
-
-  context = await browser.newContext({
-    viewport: { width: 1920, height: 1080 },
-    userAgent: USER_AGENT,
+  log(`launching chromium (${HEADLESS ? "headless" : "headed"}), profile ${PROFILE}`);
+  context = await chromium.launchPersistentContext(PROFILE, {
+    headless: HEADLESS,
+    args: LAUNCH_ARGS,
     locale: "ru-RU",
+    viewport: { width: 1280, height: 860 },
   });
-
-  // NOTE: do NOT block stylesheet/image/font/media here — the Variti anti-bot challenge
-  // loads its scripts/assets through those request types, and aborting them makes the
-  // challenge fail (Ozon then returns HTTP 403 to the composer API).
-  challenged = false;
+  context.on("close", () => {
+    context = null;
+    ozonPage = null;
+    ozonReady = false;
+  });
+  ozonReady = false;
 }
 
-async function ensureContext() {
-  if (context && challenged) return context;
-  if (initPromise) {
-    await initPromise;
-    return context;
-  }
-  initPromise = (async () => {
-    if (!browser || !browser.isConnected()) await launch();
-    // Pass the anti-bot challenge once: load the home page, let its JS run and set cookies.
-    // Keep this very page open — all fetches run from it, so they inherit the passed origin/session.
-    mainPage = await context.newPage();
-    log("passing anti-bot challenge…");
-    await mainPage.goto(HOME, { waitUntil: "domcontentloaded", timeout: NAV_TIMEOUT_MS });
-    await mainPage.waitForTimeout(CHALLENGE_WAIT_MS);
-    const title = await mainPage.title();
-    if (/antibot|ограничен|доступ/i.test(title)) {
-      throw new Error(`challenge not passed (title: ${title})`);
-    }
-    challenged = true;
-    log("challenge passed:", title.slice(0, 40));
-  })();
-  try {
-    await initPromise;
-  } finally {
-    initPromise = null;
-  }
+export async function ensureContext() {
+  if (context) return context;
+  if (initPromise) return initPromise;
+  initPromise = launch().finally(() => (initPromise = null));
+  await initPromise;
   return context;
 }
 
-const DEAD = /Target page, context or browser has been closed|Session closed|Connection closed|browser has been closed/i;
+/** Ждёт, пока страница перестанет быть заглушкой антибота (JS-проверка проходит сама, капчу решает человек). */
+export async function waitChallenge(page, label) {
+  const t0 = Date.now();
+  let title = await page.title().catch(() => "");
+  let warned = false;
+  while (CHALLENGE.test(title) && Date.now() - t0 < CAPTCHA_WAIT_MS) {
+    if (!warned && Date.now() - t0 > 15000) {
+      log(`${label}: still on "${title.slice(0, 40)}", solve the captcha in the browser window (waiting up to ${CAPTCHA_WAIT_MS / 1000}s)`);
+      await page.bringToFront().catch(() => {});
+      warned = true;
+    }
+    await page.waitForTimeout(1000);
+    title = await page.title().catch(() => "");
+  }
+  if (CHALLENGE.test(title)) throw new Error(`${label}: challenge not passed in ${CAPTCHA_WAIT_MS / 1000}s (title: ${title.slice(0, 60)})`);
+  return title;
+}
 
-/**
- * Fetch a composer-api page as parsed JSON for the given site path (e.g. "/search/?text=...").
- * Runs fetch() from the challenged main page (which stays on ozon.ru, so cookies + origin apply).
- * Pure fetch() with no navigation/DOM mutation is safe to run concurrently on one page.
- * Retries once on HTTP 403/307 (expired session) or a dead browser by relaunching.
- */
+async function ensureOzon() {
+  await ensureContext();
+  if (ozonReady && ozonPage && !ozonPage.isClosed()) return ozonPage;
+  ozonPage = await context.newPage();
+  await ozonPage.goto(OZON_HOME, { waitUntil: "domcontentloaded", timeout: NAV_TIMEOUT_MS });
+  const title = await waitChallenge(ozonPage, "ozon");
+  // после проверки страница перезагружается сама: дождаться конца навигации, иначе evaluate попадёт в её середину
+  await ozonPage.waitForLoadState("load", { timeout: NAV_TIMEOUT_MS }).catch(() => {});
+  await ozonPage.waitForTimeout(1000);
+  ozonReady = true;
+  log("ozon ready:", title.slice(0, 40));
+  return ozonPage;
+}
+
+const DEAD = /Target page, context or browser has been closed|Session closed|Connection closed|browser has been closed/i;
+const NAVIGATED = /Execution context was destroyed|Cannot find context|Frame was detached/i;
+
+/** Ozon composer-api как JSON по пути сайта ("/search/?text=..."). Повтор один раз при 403/307 или мёртвом браузере. */
 export async function fetchJson(path, { retries = 1 } = {}) {
   for (let attempt = 0; ; attempt++) {
     try {
       resetIdle();
-      await ensureContext();
-      const body = await mainPage.evaluate(async (url) => {
+      const page = await ensureOzon();
+      const body = await page.evaluate(async (url) => {
         const r = await fetch(url, { headers: { accept: "application/json" } });
         return { status: r.status, text: await r.text() };
-      }, API + encodeURIComponent(path));
-
+      }, OZON_API + encodeURIComponent(path));
       if (body.status !== 200) {
         if ((body.status === 403 || body.status === 307) && attempt < retries) {
-          await shutdown(); // session expired → relaunch + re-challenge
+          ozonReady = false;
+          await ozonPage?.close().catch(() => {});
           continue;
         }
         throw new Error(`Ozon returned HTTP ${body.status}`);
       }
       return JSON.parse(body.text);
     } catch (err) {
-      if (DEAD.test(String(err?.message)) && attempt < retries) {
+      const msg = String(err?.message);
+      if (NAVIGATED.test(msg) && attempt < retries + 1) {
+        ozonReady = false; // страница ушла в навигацию (редирект антибота): пересоздать вкладку
+        await ozonPage?.close().catch(() => {});
+        continue;
+      }
+      if (DEAD.test(msg) && attempt < retries) {
         await shutdown();
         continue;
       }
@@ -140,16 +135,34 @@ export async function fetchJson(path, { retries = 1 } = {}) {
   }
 }
 
+/**
+ * Открыть URL в новой вкладке общего профиля, дождаться прохождения антибота и отдать страницу.
+ * Вызывающий обязан закрыть страницу (page.close()) в finally.
+ */
+export async function openPage(url, { label = "page", waitUntil = "domcontentloaded", settleMs = 0 } = {}) {
+  resetIdle();
+  await ensureContext();
+  const page = await context.newPage();
+  try {
+    await page.goto(url, { waitUntil, timeout: NAV_TIMEOUT_MS });
+    await waitChallenge(page, label);
+    if (settleMs) await page.waitForTimeout(settleMs);
+    return page;
+  } catch (err) {
+    await page.close().catch(() => {});
+    throw err;
+  }
+}
+
 export async function shutdown() {
   clearTimeout(idleTimer);
-  challenged = false;
-  mainPage = null;
-  try {
-    await context?.close();
-  } catch {}
-  try {
-    await browser?.close();
-  } catch {}
+  ozonReady = false;
+  ozonPage = null;
+  const ctx = context;
   context = null;
-  browser = null;
+  try {
+    const b = ctx?.browser();
+    await ctx?.close();
+    await b?.close(); // persistent context не всегда гасит процесс Chromium
+  } catch {}
 }
