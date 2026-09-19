@@ -90,12 +90,14 @@ server.registerTool(
     description:
       "Get full details for one Ozon product: name, price (card/regular/old), availability, product " +
       "rating, seller (name + rating), images, key characteristics, and the product description " +
-      "(text and/or banner image URLs). variants > 1 means the card groups several models/colours and the rating is shared. Accepts an SKU, a full product URL, or a slug.",
+      "(text and/or banner image URLs). Full characteristics come from the /features/ page; the description is read from the rendered card (adds ~5 s), " +
+      "pass description=false to skip it. variants > 1 means the card groups several models/colours and the rating is shared. Accepts an SKU, a full product URL, or a slug.",
     inputSchema: {
       product: z
         .string()
         .min(1)
         .describe('Product SKU (e.g. "1185261285"), full ozon.ru product URL, or product slug'),
+      description: z.boolean().default(true).describe("Load the description text/images from the product page (default true, ~5 s extra)"),
     },
     annotations: { readOnlyHint: true, openWorldHint: true, idempotentHint: true },
   },

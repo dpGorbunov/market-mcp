@@ -26,7 +26,7 @@ async function one(product, { worst, recentMonths }) {
   const s = site(product);
   if (s === "ozon") {
     const [d, w, recent] = await all([
-      details({ product }),
+      details({ product, description: false }),
       reviews({ product, sort: "worst", limit: worst }),
       reviews({ product, sinceMonths: recentMonths, maxScore: 2, limit: 10, maxPages: 3 }),
     ]);

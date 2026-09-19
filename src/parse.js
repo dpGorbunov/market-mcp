@@ -256,6 +256,26 @@ export function parseDescription(page2) {
   };
 }
 
+/**
+ * Полные характеристики со страницы /features/ (composer): webCharacteristics.characteristics[].short[]/long[]
+ * -> {name: "значение, значение"}. Берём виджет с наибольшим числом позиций (второй дублирует первые пять).
+ */
+export function parseFullCharacteristics(featuresPage) {
+  let best = {};
+  for (const w of widgets(featuresPage, "webCharacteristics")) {
+    const out = {};
+    for (const g of w.characteristics || []) {
+      for (const c of [...(g.short || []), ...(g.long || [])]) {
+        const name = c.name || c.key;
+        const value = (c.values || []).map((v) => v.text).filter(Boolean).join(", ");
+        if (name && value) out[name] = value;
+      }
+    }
+    if (Object.keys(out).length > Object.keys(best).length) best = out;
+  }
+  return best;
+}
+
 export function parseDetails(basePage, page2) {
   const heading = widget(basePage, "webProductHeading");
   const price = widget(basePage, "webPrice");

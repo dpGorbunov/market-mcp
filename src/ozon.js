@@ -1,6 +1,6 @@
 // High-level Ozon operations: build composer-api paths, fetch via the browser, parse to plain data.
-import { fetchJson } from "./browser.js";
-import { parseSearch, parseDetails, parseReviews, parseFilters } from "./parse.js";
+import { fetchJson, openPage, queued } from "./browser.js";
+import { parseSearch, parseDetails, parseReviews, parseFilters, parseFullCharacteristics } from "./parse.js";
 import { refine } from "./rank.js";
 
 const SORT_MAP = {
@@ -93,13 +93,53 @@ export async function filters({ query }) {
   };
 }
 
-export async function details({ product }) {
+/**
+ * Описание карточки. С сентября 2026 composer-страница "pdpPage2column" отдаёт 403, описание
+ * рендерится в HTML карточки при прокрутке до блока webDescription: открываем страницу, докручиваем, читаем DOM.
+ */
+async function descriptionFromPage(path) {
+  return queued("ozon-page", async () => {
+    const page = await openPage(`https://www.ozon.ru${path}`, { label: "ozon-pdp", settleMs: 1500 });
+    try {
+      const w = page.locator('[data-widget="webDescription"]').first();
+      for (let i = 0; i < 6 && !(await w.count()); i++) {
+        await page.evaluate(() => window.scrollBy(0, 2500));
+        await page.waitForTimeout(800);
+      }
+      if (!(await w.count())) return { text: "", images: [] };
+      await w.scrollIntoViewIfNeeded().catch(() => {});
+      await page.waitForTimeout(1500);
+      return page.evaluate(() => {
+        const els = [...document.querySelectorAll('[data-widget="webDescription"]')];
+        const text = els.map((e) => e.innerText).join("\n").replace(/^\s*Описание\s*/, "").replace(/\s+/g, " ").trim();
+        const images = [...new Set(els.flatMap((e) => [...e.querySelectorAll("img")].map((i) => i.currentSrc || i.src)).filter(Boolean))];
+        return { text, images };
+      });
+    } finally {
+      await page.close().catch(() => {});
+    }
+  });
+}
+
+/**
+ * Карточка: базовая composer-страница (цена, рейтинг, продавец, варианты) + полные характеристики со
+ * страницы /features/ (composer) + описание из DOM карточки (description=false пропускает этот шаг, ~5 с).
+ */
+export async function details({ product, description = true }) {
   const basePage = await fetchJson(productPath(product));
-  // страница описания требует полный путь со slug: по голому sku Ozon отдаёт 403
   const seo = basePage?.seo?.link?.[0]?.href;
   const path = seo ? productPath(seo) : productPath(product);
-  const page2 = await fetchJson(`${path}?layout_container=pdpPage2column&layout_page_index=2`, { retries: 0 }).catch(() => null);
-  return parseDetails(basePage, page2 || {});
+  const [features, descr] = await Promise.all([
+    fetchJson(`${path}features/`, { retries: 0 }).catch(() => null),
+    description ? descriptionFromPage(path).catch((e) => ({ text: "", images: [], error: e.message })) : null,
+  ]);
+  const d = parseDetails(basePage, {});
+  const full = features ? parseFullCharacteristics(features) : {};
+  return {
+    ...d,
+    characteristics: Object.keys(full).length ? full : d.characteristics,
+    description: descr || { text: "", images: [], skipped: true },
+  };
 }
 
 const REVIEW_SORT = { newest: "published_at_desc", best: "score_desc", worst: "score_asc" };

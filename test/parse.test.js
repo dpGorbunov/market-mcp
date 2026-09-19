@@ -1,6 +1,6 @@
 // Offline parser tests against saved composer-api samples. No browser/network.
 import { readFileSync } from "fs";
-import { parseSearch, parseDetails, parseReviews } from "../src/parse.js";
+import { parseSearch, parseDetails, parseReviews, parseFullCharacteristics } from "../src/parse.js";
 
 const load = (f) => JSON.parse(readFileSync(new URL(`../samples/${f}`, import.meta.url), "utf8"));
 let failed = 0;
@@ -29,6 +29,12 @@ check(d.images.length > 0, "details has images");
 check(Object.keys(d.characteristics).length > 0, "details has characteristics");
 check(d.variants === null || typeof d.variants === "number", `details variants: ${d.variants}`);
 check(d.description.text.length > 0 || d.description.images.length > 0, "details has description (text or images)");
+
+console.error("── parseFullCharacteristics ──");
+const fc = parseFullCharacteristics(load("pdp_features.json"));
+console.error("   ", Object.keys(fc).length, "chars, e.g.", JSON.stringify(Object.entries(fc).slice(0, 3)));
+check(Object.keys(fc).length >= 20, "features page gives 20+ characteristics");
+check(fc["Количество конфорок"] === "2" && fc["Системы защиты"]?.includes("Защита от перегрева"), "short and long values joined");
 
 console.error("── parseReviews ──");
 const r = parseReviews(load("reviews.json"), 10);
