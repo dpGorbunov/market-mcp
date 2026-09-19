@@ -97,11 +97,26 @@ async function ensureOzon() {
   return ozonPage;
 }
 
+// Очередь на площадку: параллельные запросы к одному сайту (compare, обход страниц) ловят 403 у
+// Ozon и обрыв навигации у DNS. Разные площадки идут параллельно, внутри одной - по очереди.
+const queues = new Map();
+export function queued(key, fn) {
+  const prev = queues.get(key) || Promise.resolve();
+  const run = prev.catch(() => {}).then(fn);
+  queues.set(key, run);
+  run.then(() => {}, () => {}).finally(() => { if (queues.get(key) === run) queues.delete(key); });
+  return run;
+}
+
 const DEAD = /Target page, context or browser has been closed|Session closed|Connection closed|browser has been closed/i;
 const NAVIGATED = /Execution context was destroyed|Cannot find context|Frame was detached/i;
 
 /** Ozon composer-api как JSON по пути сайта ("/search/?text=..."). Повтор один раз при 403/307 или мёртвом браузере. */
-export async function fetchJson(path, { retries = 1 } = {}) {
+export function fetchJson(path, opts) {
+  return queued("ozon", () => fetchJsonNow(path, opts));
+}
+
+async function fetchJsonNow(path, { retries = 2 } = {}) {
   for (let attempt = 0; ; attempt++) {
     try {
       resetIdle();
@@ -112,8 +127,10 @@ export async function fetchJson(path, { retries = 1 } = {}) {
       }, OZON_API + encodeURIComponent(path));
       if (body.status !== 200) {
         if ((body.status === 403 || body.status === 307) && attempt < retries) {
+          log(`ozon HTTP ${body.status} on ${path.slice(0, 60)}, retry ${attempt + 1}`);
           ozonReady = false;
           await ozonPage?.close().catch(() => {});
+          await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
           continue;
         }
         throw new Error(`Ozon returned HTTP ${body.status}`);

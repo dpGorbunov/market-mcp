@@ -88,7 +88,7 @@ function parseSearchItem(it) {
 
   // brand: a labelListV2 that is not the rating block; take its first text item, but skip
   // marketing badges ("Стало дешевле", "Оригинал", "Хит", price-drop labels, etc.)
-  const BADGE = /^(стало дешевле|оригинал|хит|новинка|акция|распродажа|выбор|бестселлер|ozon|premium|самовывоз|скидка)/i;
+  const BADGE = /^(стало дешевле|оригинал|хит|новинка|акция|распродажа|выбор|бестселлер|ozon|premium|самовывоз|скидка|бренд проверен|официальн)/i;
   let brand = null;
   const labelLists = ms
     .filter((s) => s.labelListV2 && !JSON.stringify(s.labelListV2).includes("ic_s_star"))
@@ -129,7 +129,48 @@ export function parseSearch(page, limit = 12) {
   const grid = widget(page, "tileGridDesktop");
   const raw = grid?.items || [];
   const items = raw.map(parseSearchItem).filter(Boolean).slice(0, limit);
-  return { count: items.length, items };
+  const hasNext = !!widget(page, "infiniteVirtualPaginator")?.nextPage;
+  return { count: items.length, hasNext, items };
+}
+
+// ── search filters ──────────────────────────────────────────────────────────────
+// filtersDesktop.sections[].filters[]: {type, key, boolFilter|checkboxesFilter|rangeFilter|
+// multipleRangesFilter|colorFilter|categoryFilter}. В URL: bool -> key=t, checkboxes -> key=id1,id2,
+// range -> key=min.000;max.000. Категория задаётся отдельным путём /category/<slug>/.
+
+function filterOptions(f) {
+  const cb = f.checkboxesFilter || f.colorFilter;
+  if (cb) return (cb.sections || []).flatMap((s) => s.items || []).map((i) => ({ key: String(i.key), title: i.title?.text || i.title || i.name || String(i.key), selected: !!i.isSelected })).filter((o) => o.title);
+  if (f.categoryFilter) return (f.categoryFilter.categories || []).map((c) => ({ key: c.urlValue || c.key, title: c.title, level: c.level }));
+  return [];
+}
+
+function filterRange(f) {
+  const r = f.rangeFilter || f.multipleRangesFilter?.rangeFilter;
+  if (!r) return null;
+  const num = (x) => (x == null ? null : Number(String(x).replace(/[^\d.]/g, "")) || null);
+  return { min: num(r.minValue ?? r.min ?? r.leftBound), max: num(r.maxValue ?? r.max ?? r.rightBound) };
+}
+
+/** Все фильтры страницы поиска/каталога: [{key, title, type, options[], range}]. */
+export function parseFilters(page) {
+  const out = [];
+  for (const w of widgets(page, "filtersDesktop")) {
+    for (const s of w.sections || []) {
+      for (const f of s.filters || []) {
+        const body = f.boolFilter || f.checkboxesFilter || f.colorFilter || f.rangeFilter || f.multipleRangesFilter?.rangeFilter || f.categoryFilter || {};
+        const type = f.type === "boolFilter" ? "bool" : /checkboxes|color/.test(f.type) ? "checkboxes" : /range/i.test(f.type) ? "range" : f.type === "categoryFilter" ? "category" : f.type;
+        const entry = { key: f.key, title: (body.title || "").replace(/\s+/g, " ").trim(), type };
+        if (body.description?.text) entry.description = body.description.text.replace(/<[^>]+>/g, "").trim();
+        const options = filterOptions(f);
+        if (options.length) entry.options = options;
+        const range = filterRange(f);
+        if (range) entry.range = range;
+        if (!out.some((e) => e.key === entry.key)) out.push(entry);
+      }
+    }
+  }
+  return out;
 }
 
 // ── product details ─────────────────────────────────────────────────────────────
@@ -230,6 +271,10 @@ export function parseDetails(basePage, page2) {
     (sku ? `https://www.ozon.ru/product/${sku}/` : null);
 
   const { rating, reviews } = parseProductScore(basePage);
+  // webAspects: варианты (цвет, размер) одной карточки. Отзывы и рейтинг у вариантов общие,
+  // поэтому variants > 1 значит "рейтинг агрегирован по нескольким моделям/цветам".
+  const aspects = widget(basePage, "webAspects")?.aspects || [];
+  const variants = aspects.reduce((m, a) => Math.max(m, Number(a.aspectModalInfo?.realNumberOfVariants) || (a.variants || []).length || 0), 0) || null;
 
   const images = [];
   if (gallery?.coverImage) images.push(gallery.coverImage);
@@ -248,6 +293,7 @@ export function parseDetails(basePage, page2) {
     available: price?.isAvailable ?? null,
     rating,
     reviews,
+    variants,
     seller: parseSeller(basePage),
     images: [...new Set(images)].slice(0, 10),
     characteristics: parseShortCharacteristics(basePage),

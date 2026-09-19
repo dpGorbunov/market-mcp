@@ -27,6 +27,7 @@ check(typeof d.price === "number", "details price is number");
 check(!!d.name, "details has name");
 check(d.images.length > 0, "details has images");
 check(Object.keys(d.characteristics).length > 0, "details has characteristics");
+check(d.variants === null || typeof d.variants === "number", `details variants: ${d.variants}`);
 check(d.description.text.length > 0 || d.description.images.length > 0, "details has description (text or images)");
 
 console.error("── parseReviews ──");

@@ -1,19 +1,31 @@
 // Живая проверка всех площадок: node scripts/probe.mjs ["запрос"]. Открывает окно браузера, закрывает в конце.
-import { search, reviews } from "../src/ozon.js";
+// Для проверки параллельно с работающим MCP: MARKET_PROFILE_DIR=~/.market-mcp/profile-dev (копия профиля).
+import { search, reviews, filters } from "../src/ozon.js";
 import { dnsSearch, dnsProduct, dnsReviews } from "../src/dns.js";
-import { yandexSearch, yandexCard } from "../src/yandex.js";
+import { yandexSearch, yandexCard, yandexReviews } from "../src/yandex.js";
+import { compare } from "../src/compare.js";
 import { shutdown } from "../src/browser.js";
-const q = process.argv[2] || "Bosch PIB375FB1E";
+const q = process.argv[2] || "индукционная варочная панель 30 см";
 const brief = (o) => JSON.stringify(o, null, 1).slice(0, 1800);
+const row = (i) => [i.brand, i.name?.slice(0, 45), i.price, i.rating, i.reviews, i.score].join(" | ");
+const t0 = Date.now(); const lap = (l) => console.log(`--- ${l} (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
 try {
-  const s = await search({ query: q, limit: 3 });
-  console.log("ozon_search:", brief(s.items.map((i) => [i.sku, i.name.slice(0, 50), i.price, i.rating, i.reviews])));
-  if (s.items[0]) { const r = await reviews({ product: s.items[0].url, sort: "worst", limit: 2 }); console.log("ozon_reviews:", brief({ rating: r.rating, distribution: r.distribution, paging: r.paging, first: r.reviews[0] })); }
-  const d = await dnsSearch({ query: q, limit: 3 });
-  console.log("dns_search:", brief(d));
-  const t = d.items.find((i) => i.reviews) || d.items[0];
-  if (t) { const p = await dnsProduct({ product: t.url }); console.log("dns_product:", brief({ name: p.name, price: p.price, n: Object.keys(p.characteristics).length })); const r = await dnsReviews({ product: t.url, limit: 2 }); console.log("dns_reviews:", brief({ rating: r.rating, distribution: r.distribution, first: r.reviews[0] })); }
-  const y = await yandexSearch({ query: q, limit: 3 });
-  console.log("yandex_search:", brief(y.items.map((i) => [i.name.slice(0, 50), i.price, i.priceOld, i.rating])));
-  if (y.items[0]) { const c = await yandexCard({ product: y.items[0].url }); console.log("yandex_card:", brief({ name: c.name, price: c.price, offersCount: c.offersCount, seller: c.seller, n: Object.keys(c.characteristics).length, sample: Object.entries(c.characteristics).slice(0, 4) })); }
-} finally { await shutdown(); }
+  const f = await filters({ query: q });
+  lap("ozon_filters"); console.log(f.filters.map((x) => `${x.key}[${x.type}]${x.options ? " " + x.options.length + " opts" : ""}`).join(", "));
+  const s = await search({ query: q, pages: 3, brand: "Bosch", ratingMin: 4.5, reviewsMin: 10, sortBy: "score", limit: 5 });
+  lap("ozon_search brand+pages"); console.log("serverBrand:", s.serverBrand, "scanned:", s.scanned); console.log(s.items.map(row).join("\n"));
+  const s2 = await search({ query: q, pages: 2, highRating: true, include: ["30 см"], reviewsMin: 100, sortBy: "score", limit: 6 });
+  lap("ozon_search highRating+include"); console.log("scanned:", s2.scanned); console.log(s2.items.map(row).join("\n"));
+  const rr = await reviews({ product: "3486517156", sinceMonths: 12, maxScore: 2, limit: 5, maxPages: 3 });
+  lap("ozon_reviews recent low"); console.log(brief({ scanned: rr.scanned, count: rr.count, first: rr.reviews[0] }));
+  const d = await dnsSearch({ query: "индукционная варочная панель", sort: "rating", pages: 2, include: ["2 шт"], reviewsMin: 50, sortBy: "score", limit: 6 });
+  lap("dns_search sort+pages+include"); console.log("scanned:", d.scanned, "total:", d.totalOnSite); console.log(d.items.map((i) => row(i) + " | " + i.reliability + " | " + JSON.stringify(i.specs).slice(0, 80)).join("\n"));
+  const dr = d.items[0] ? await dnsReviews({ product: d.items[0].url, sinceMonths: 12, maxScore: 3, limit: 3 }) : null;
+  lap("dns_reviews recent low"); console.log(brief({ scanned: dr?.scanned, count: dr?.count, first: dr?.reviews[0] }));
+  const y = await yandexSearch({ query: q, pages: 2, priceMax: 30000, include: ["2 конфорки"], sortBy: "price", limit: 5 });
+  lap("yandex_search pages+filter"); console.log("scanned:", y.scanned); console.log(y.items.map(row).join("\n"));
+  const yr = y.items[0] ? await yandexReviews({ product: y.items[0].url, limit: 2 }) : null;
+  lap("yandex_reviews"); console.log(brief({ noReviews: yr?.noReviews, count: yr?.count, hint: yr?.hint }));
+  const c = await compare({ products: ["3486517156", d.items[0]?.url, y.items[0]?.url].filter(Boolean), worst: 3, recentMonths: 12 });
+  lap("compare"); console.log(brief(c.items.map((i) => ({ site: i.site, name: i.name?.slice(0, 40), rating: i.rating, reviews: i.reviews, score: i.score, lowSharePct: i.lowSharePct, aggregated: i.aggregated, worst: i.worst?.length, recentLow: i.recentLow?.count, error: i.error }))));
+} catch (e) { console.log("ERR", e.stack); } finally { await shutdown(); }
