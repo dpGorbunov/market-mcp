@@ -16,6 +16,26 @@ const log = (...a) => console.error("[market-mcp]", ...a);
 const TOOL_TIMEOUT_MS = 110000; // multi-page walks and compare need more than one page load
 const MAX_TEXT = 60000; // cap JSON-RPC payload size
 
+// Компактный вывод (MARKET_COMPACT=0 выключает): JSON без отступов, только строки длиннее MAX_STR (описания, редкие длинные отзывы)
+// обрезаются, пустые поля и ссылки на картинки убираются. Тексты отзывов до 600 символов идут целиком.
+const COMPACT = process.env.MARKET_COMPACT !== "0";
+const MAX_STR = Number(process.env.MARKET_MAX_STR || 600);
+const DROP_KEYS = new Set(["images", "specsText"]);
+
+function shrink(v) {
+  if (typeof v === "string") return v.length > MAX_STR ? v.slice(0, MAX_STR) + "…" : v;
+  if (Array.isArray(v)) return v.map(shrink);
+  if (v && typeof v === "object") {
+    const out = {};
+    for (const [k, x] of Object.entries(v)) {
+      if (DROP_KEYS.has(k) || x == null || x === "" || (Array.isArray(x) && !x.length)) continue;
+      out[k] = shrink(x);
+    }
+    return out;
+  }
+  return v;
+}
+
 function withTimeout(promise, ms, label) {
   return Promise.race([
     promise,
@@ -30,7 +50,7 @@ function tool(label, fn) {
   return async (args) => {
     try {
       const result = await withTimeout(fn(args), TOOL_TIMEOUT_MS, label);
-      let text = JSON.stringify(result, null, 2);
+      let text = JSON.stringify(COMPACT ? shrink(result) : result, null, COMPACT ? 0 : 2);
       if (text.length > MAX_TEXT) text = text.slice(0, MAX_TEXT) + "\n…(truncated)";
       return { content: [{ type: "text", text }] };
     } catch (err) {
