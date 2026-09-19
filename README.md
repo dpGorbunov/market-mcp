@@ -69,3 +69,5 @@ node scripts/probe.mjs    # живая проверка всех площадо�
 Пока MCP-сервер запущен, профиль занят: для живой проверки скопировать его (`cp -R ~/.market-mcp/profile ~/.market-mcp/profile-dev`) и запускать пробу с `MARKET_PROFILE_DIR=~/.market-mcp/profile-dev`.
 
 `src/browser.js` - браузер, антибот, очереди по площадкам; `src/rank.js` - общий фильтр и ранжирование; `src/ozon.js` + `src/parse.js` - Ozon; `src/dns.js` + `src/parse_dns.js` - DNS; `src/yandex.js` - Маркет; `src/compare.js` - сравнение; `src/index.js` - регистрация инструментов. Логи только в stderr, stdout занят JSON-RPC.
+
+Как агенту работать с инструментами и по каким критериям отбирать товар: `docs/AGENT-GUIDE.md`.
