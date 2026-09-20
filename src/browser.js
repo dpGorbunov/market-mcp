@@ -25,7 +25,12 @@ const NAV_TIMEOUT_MS = 90000;
 // Титулы страниц-заглушек антибота у всех площадок.
 const CHALLENGE = /antibot|доступ ограничен|нет соединения|captcha|проверка браузера|qrator|robot|attention required|access denied/i;
 
-const LAUNCH_ARGS = ["--disable-blink-features=AutomationControlled", "--no-first-run", "--no-default-browser-check", "--mute-audio"];
+// Окно нужно антиботам, но пользователю не нужно: по умолчанию уводим его за край экрана
+// (MARKET_WINDOW_POS="x,y", пустая строка - показывать окно как обычно). Вьюпорт страницы задаётся
+// Playwright отдельно, поэтому размер и положение окна на вёрстку не влияют.
+const WINDOW_POS = process.env.MARKET_WINDOW_POS ?? "-4000,-4000";
+const LAUNCH_ARGS = ["--disable-blink-features=AutomationControlled", "--no-first-run", "--no-default-browser-check", "--mute-audio",
+  ...(WINDOW_POS ? [`--window-position=${WINDOW_POS}`, "--window-size=400,300"] : [])];
 
 const log = (...a) => console.error("[browser]", ...a);
 
