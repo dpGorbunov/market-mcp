@@ -20,15 +20,14 @@ check(it.url?.startsWith("https://") && !it.url.includes("?"), "item url clean+a
 check(s.items.every((x) => x.price), "every item has a price");
 
 console.error("── parseDetails ──");
-const d = parseDetails(load("pdp.json"), load("pdp_page2.json"));
-console.error("   ", JSON.stringify({ sku: d.sku, name: d.name?.slice(0, 40), price: d.price, priceRegular: d.priceRegular, oldPrice: d.oldPrice, available: d.available, seller: d.seller?.name, chars: Object.keys(d.characteristics).length, descText: d.description.text.length, descImgs: d.description.images.length, imgs: d.images.length }));
+const d = parseDetails(load("pdp.json"));
+console.error("   ", JSON.stringify({ sku: d.sku, name: d.name?.slice(0, 40), price: d.price, priceRegular: d.priceRegular, oldPrice: d.oldPrice, available: d.available, seller: d.seller?.name, chars: Object.keys(d.characteristics).length, imgs: d.images.length }));
 check(!!d.sku, "details has sku");
 check(typeof d.price === "number", "details price is number");
 check(!!d.name, "details has name");
 check(d.images.length > 0, "details has images");
 check(Object.keys(d.characteristics).length > 0, "details has characteristics");
 check(d.variants === null || typeof d.variants === "number", `details variants: ${d.variants}`);
-check(d.description.text.length > 0 || d.description.images.length > 0, "details has description (text or images)");
 
 console.error("── parseFullCharacteristics ──");
 const fc = parseFullCharacteristics(load("pdp_features.json"));

@@ -223,39 +223,6 @@ function parseSeller(page) {
   return { name, rating, url };
 }
 
-/** webDescription.richAnnotationJson holds rich content blocks: text items and images. */
-export function parseDescription(page2) {
-  const w = widgets(page2, "webDescription").find((x) => x.richAnnotationJson);
-  if (!w) return { text: "", images: [] };
-  let ra = w.richAnnotationJson;
-  if (typeof ra === "string") {
-    try {
-      ra = JSON.parse(ra);
-    } catch {
-      return { text: "", images: [] };
-    }
-  }
-  const texts = [];
-  const images = [];
-  const walk = (n) => {
-    if (!n) return;
-    if (Array.isArray(n)) return n.forEach(walk);
-    if (typeof n !== "object") return;
-    if (n.type === "text" && typeof n.content === "string") texts.push(n.content);
-    if (n.img?.src) images.push(n.img.src);
-    if (Array.isArray(n.items))
-      n.items.forEach((it) => {
-        if (it?.type === "text" && typeof it.content === "string") texts.push(it.content);
-      });
-    for (const k in n) if (n[k] && typeof n[k] === "object") walk(n[k]);
-  };
-  walk(ra.content || ra);
-  return {
-    text: texts.join(" ").replace(/\s+/g, " ").trim(),
-    images: [...new Set(images)],
-  };
-}
-
 /**
  * Полные характеристики со страницы /features/ (composer): webCharacteristics.characteristics[].short[]/long[]
  * -> {name: "значение, значение"}. Берём виджет с наибольшим числом позиций (второй дублирует первые пять).
@@ -276,7 +243,7 @@ export function parseFullCharacteristics(featuresPage) {
   return best;
 }
 
-export function parseDetails(basePage, page2) {
+export function parseDetails(basePage) {
   const heading = widget(basePage, "webProductHeading");
   const price = widget(basePage, "webPrice");
   const gallery = widget(basePage, "webGallery");
@@ -317,7 +284,6 @@ export function parseDetails(basePage, page2) {
     seller: parseSeller(basePage),
     images: [...new Set(images)].slice(0, 10),
     characteristics: parseShortCharacteristics(basePage),
-    description: parseDescription(page2),
   };
 }
 

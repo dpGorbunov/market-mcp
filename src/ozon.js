@@ -133,7 +133,7 @@ export async function details({ product, description = true }) {
     fetchJson(`${path}features/`, { retries: 0 }).catch(() => null),
     description ? descriptionFromPage(path).catch((e) => ({ text: "", images: [], error: e.message })) : null,
   ]);
-  const d = parseDetails(basePage, {});
+  const d = parseDetails(basePage);
   const full = features ? parseFullCharacteristics(features) : {};
   return {
     ...d,
