@@ -13,24 +13,43 @@
 import { chromium } from "playwright";
 import { homedir } from "os";
 import { join } from "path";
+import { execFile } from "child_process";
 
 const OZON_HOME = "https://www.ozon.ru/";
 const OZON_API = "https://www.ozon.ru/api/composer-api.bx/page/json/v2?url=";
 const PROFILE = process.env.MARKET_PROFILE_DIR || join(homedir(), ".market-mcp", "profile");
 const HEADLESS = process.env.MARKET_HEADLESS === "true";
 const CAPTCHA_WAIT_MS = 1000 * Number(process.env.MARKET_CAPTCHA_WAIT_S || 120);
-const IDLE_TIMEOUT_MS = 60 * 1000 * Number(process.env.MARKET_IDLE_MIN || 10);
+const IDLE_TIMEOUT_MS = 60 * 1000 * Number(process.env.MARKET_IDLE_MIN || 720);
 const NAV_TIMEOUT_MS = 90000;
 
 // Титулы страниц-заглушек антибота у всех площадок.
 const CHALLENGE = /antibot|доступ ограничен|нет соединения|captcha|проверка браузера|qrator|robot|attention required|access denied/i;
 
-// Окно нужно антиботам, но пользователю не нужно: по умолчанию уводим его за край экрана
-// (MARKET_WINDOW_POS="x,y", пустая строка - показывать окно как обычно). Вьюпорт страницы задаётся
-// Playwright отдельно, поэтому размер и положение окна на вёрстку не влияют.
-const WINDOW_POS = process.env.MARKET_WINDOW_POS ?? "-4000,-4000";
+// Окно нужно антиботам, но пользователю не нужно. Уводить его за экран macOS не даёт (возвращает
+// на экран), поэтому после запуска прячем процесс Chromium как по Cmd+H через System Events
+// (MARKET_HIDE_WINDOW=0 выключает; окно понадобится, чтобы решить капчу руками).
+const HIDE_WINDOW = process.env.MARKET_HIDE_WINDOW !== "0" && process.platform === "darwin";
+// Окно всё равно создаётся на долю секунды до скрытия: делаем его маленьким и просим положить
+// в дальний угол (macOS подтянет к краю экрана). На вёрстку не влияет: вьюпорт задаёт Playwright.
 const LAUNCH_ARGS = ["--disable-blink-features=AutomationControlled", "--no-first-run", "--no-default-browser-check", "--mute-audio",
-  ...(WINDOW_POS ? [`--window-position=${WINDOW_POS}`, "--window-size=400,300"] : [])];
+  ...(HIDE_WINDOW ? ["--window-position=20000,20000", "--window-size=320,240"] : [])];
+
+const BROWSER_PROC = '(every process whose name contains "Chrome for Testing" or name is "Chromium")';
+
+function setWindowVisible(visible) {
+  if (!HIDE_WINDOW) return Promise.resolve();
+  const script = `tell application "System Events" to set visible of ${BROWSER_PROC} to ${visible}`;
+  return new Promise((res) => execFile("osascript", ["-e", script], (err) => { if (err) log("window:", err.message); res(); }));
+}
+
+/** Прячем приложение с первых миллисекунд запуска, пока окно ещё не показано: опрос каждые 100 мс до 5 с. */
+function hideEarly() {
+  if (!HIDE_WINDOW) return;
+  const t0 = Date.now();
+  const tick = () => setWindowVisible(false).then(() => { if (Date.now() - t0 < 5000) setTimeout(tick, 100); });
+  tick();
+}
 
 const log = (...a) => console.error("[browser]", ...a);
 
@@ -48,11 +67,12 @@ function resetIdle() {
 
 async function launch() {
   log(`launching chromium (${HEADLESS ? "headless" : "headed"}), profile ${PROFILE}`);
+  hideEarly();
   context = await chromium.launchPersistentContext(PROFILE, {
     headless: HEADLESS,
     args: LAUNCH_ARGS,
     locale: "ru-RU",
-    viewport: { width: 1280, height: 860 },
+    viewport: HIDE_WINDOW ? null : { width: 1280, height: 860 }, // при скрытии окно 320x240, вьюпорт страниц задаётся ниже
   });
   context.on("close", () => {
     context = null;
@@ -78,6 +98,7 @@ export async function waitChallenge(page, label) {
   while (CHALLENGE.test(title) && Date.now() - t0 < CAPTCHA_WAIT_MS) {
     if (!warned && Date.now() - t0 > 15000) {
       log(`${label}: still on "${title.slice(0, 40)}", solve the captcha in the browser window (waiting up to ${CAPTCHA_WAIT_MS / 1000}s)`);
+      await setWindowVisible(true);
       await page.bringToFront().catch(() => {});
       warned = true;
     }
@@ -85,6 +106,7 @@ export async function waitChallenge(page, label) {
     title = await page.title().catch(() => "");
   }
   if (CHALLENGE.test(title)) throw new Error(`${label}: challenge not passed in ${CAPTCHA_WAIT_MS / 1000}s (title: ${title.slice(0, 60)})`);
+  if (warned) setWindowVisible(false);
   return title;
 }
 
@@ -92,6 +114,7 @@ async function ensureOzon() {
   await ensureContext();
   if (ozonReady && ozonPage && !ozonPage.isClosed()) return ozonPage;
   ozonPage = await context.newPage();
+  if (HIDE_WINDOW) await ozonPage.setViewportSize({ width: 1280, height: 860 });
   await ozonPage.goto(OZON_HOME, { waitUntil: "domcontentloaded", timeout: NAV_TIMEOUT_MS });
   const title = await waitChallenge(ozonPage, "ozon");
   // после проверки страница перезагружается сама: дождаться конца навигации, иначе evaluate попадёт в её середину
@@ -165,6 +188,8 @@ export async function openPage(url, { label = "page", waitUntil = "domcontentloa
   resetIdle();
   await ensureContext();
   const page = await context.newPage();
+  setWindowVisible(false);
+  if (HIDE_WINDOW) await page.setViewportSize({ width: 1280, height: 860 });
   try {
     await page.goto(url, { waitUntil, timeout: NAV_TIMEOUT_MS });
     await waitChallenge(page, label);
