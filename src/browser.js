@@ -61,8 +61,16 @@ let initPromise = null;
 let idleTimer = null;
 const pageSites = new WeakMap();
 
+const guards = new WeakMap();
+
 // Playwright routes only intercept the first HTTP redirect hop. CDP checks every hop.
-export async function protectPage(ctx, page, scopes) {
+// Idempotent: a page already guarded (e.g. by protectContext's page listener) is not guarded twice.
+export function protectPage(ctx, page, scopes) {
+  if (!guards.has(page)) guards.set(page, guard(ctx, page, scopes));
+  return guards.get(page);
+}
+
+async function guard(ctx, page, scopes) {
   const session = await ctx.newCDPSession(page);
   session.on('Fetch.requestPaused', event => {
     const allowed = requestAllowed(event.request.url, scopes.get(page), event.resourceType === 'Document');
@@ -73,13 +81,11 @@ export async function protectPage(ctx, page, scopes) {
   await session.send('Fetch.enable', {patterns: [{urlPattern: '*', requestStage: 'Request'}]});
 }
 
+// Every page, including ones the site opens itself, gets the CDP guard; unscoped pages cannot
+// navigate. A context-wide ctx.route here made Ozon's composer-api answer 403 (verified on the
+// GPU host 2026-09-22), so it is intentionally absent.
 export async function protectContext(ctx, scopes) {
-  await ctx.route('**/*', route => {
-    const request = route.request();
-    let site;
-    try { site = scopes.get(request.frame().page()); } catch { return route.abort(); }
-    return requestAllowed(request.url(), site, request.isNavigationRequest()) ? route.fallback() : route.abort();
-  });
+  ctx.on('page', page => { protectPage(ctx, page, scopes).catch(() => {}); });
   await ctx.routeWebSocket('**/*', socket => socket.close());
 }
 
