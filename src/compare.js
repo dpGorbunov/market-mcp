@@ -4,13 +4,7 @@ import { details, reviews } from "./ozon.js";
 import { dnsProduct, dnsReviews } from "./dns.js";
 import { yandexCard, yandexReviews } from "./yandex.js";
 import { lowShare, bayes } from "./rank.js";
-
-function site(product) {
-  const p = String(product || "");
-  if (/dns-shop\.ru|^[0-9a-f]{16}$/i.test(p)) return "dns";
-  if (/market\.yandex\.ru/.test(p)) return "yandex";
-  return "ozon";
-}
+import { productSite as site } from "./urls.js";
 
 /** Promise.all, но без "unhandled rejection" у остальных промисов при первой ошибке. */
 async function all(promises) {
@@ -62,6 +56,7 @@ async function one(product, { worst, recentMonths }) {
 /** products: список url/sku/id (до 6). worst: сколько худших отзывов на товар. recentMonths: окно свежих плохих. */
 export async function compare({ products, worst = 8, recentMonths = 12 }) {
   if (!Array.isArray(products) || !products.length) throw new Error("products[] is required");
+  products.slice(0, 6).forEach(site); // Validate the entire batch before opening any page.
   const results = await Promise.all(
     products.slice(0, 6).map((p) => one(p, { worst, recentMonths }).catch((e) => ({ site: site(p), product: p, error: e.message })))
   );

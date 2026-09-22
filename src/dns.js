@@ -3,18 +3,14 @@
 import { openPage, queued } from "./browser.js";
 import { parseDnsOpinions } from "./parse_dns.js";
 import { parseCardSpecs, refine } from "./rank.js";
+import { productUrl } from "./urls.js";
 
 const BASE = "https://www.dns-shop.ru";
 const SORT_MAP = { popular: "", rating: "rating", price: "price-asc", price_desc: "price-desc", new: "new", discount: "discount" };
 
 /** Принимает url карточки DNS, путь "/product/<id>/<slug>/" или голый id; отдаёт "<id>/<slug>/" или "<id>/". */
 function productKey(product) {
-  const p = String(product || "").trim();
-  if (!p) throw new Error("product is required (url, path or id)");
-  const m = p.match(/\/product\/(?:opinion\/|characteristics\/|analog\/)?([0-9a-f]{16})\/([^/?#]+)?/i);
-  if (m) return `${m[1]}/${m[2] ? m[2] + "/" : ""}`;
-  if (/^[0-9a-f]{16}$/i.test(p)) return `${p}/`;
-  throw new Error("cannot recognise DNS product: pass the product URL or 16-hex id");
+  return new URL(productUrl('dns', product)).pathname.slice('/product/'.length);
 }
 
 function withPage(url, label, fn, settleMs = 4000) {

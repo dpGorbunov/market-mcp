@@ -2,6 +2,7 @@
 import { fetchJson, openPage, queued } from "./browser.js";
 import { parseSearch, parseDetails, parseReviews, parseFilters, parseFullCharacteristics } from "./parse.js";
 import { refine } from "./rank.js";
+import { productUrl } from "./urls.js";
 
 const SORT_MAP = {
   popular: "",
@@ -14,12 +15,7 @@ const SORT_MAP = {
 
 /** Accept a product as sku ("1185261285"), full url, or slug; return the site path "/product/.../". */
 function productPath(product) {
-  const p = String(product || "").trim();
-  if (!p) throw new Error("product is required (sku, url, or slug)");
-  if (/^https?:\/\//.test(p)) return new URL(p).pathname.replace(/\/?$/, "/");
-  if (p.startsWith("/product/")) return p.replace(/\/?$/, "/");
-  if (/^\d+$/.test(p)) return `/product/${p}/`; // bare sku — Ozon resolves the slug
-  return `/product/${p.replace(/^\/+|\/+$/g, "")}/`; // slug
+  return new URL(productUrl('ozon', product)).pathname;
 }
 
 /** Серверные параметры поиска Ozon: bool -> key=t, список -> key=a,b, диапазон -> key=min.000;max.000. */
