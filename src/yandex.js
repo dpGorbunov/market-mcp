@@ -3,6 +3,7 @@
 // модели они есть (страница <card>/reviews). Оценки отдельных отзывов в тексте страницы не выводятся.
 import { openPage, queued } from "./browser.js";
 import { refine } from "./rank.js";
+import { productUrl } from "./urls.js";
 
 const BASE = "https://market.yandex.ru";
 
@@ -79,27 +80,40 @@ export async function yandexSearch({ query, limit = 12, pages = 1, ...opts }) {
   return { query, scanned: all.length, count: items.length, items };
 }
 
-function cardUrl(product) {
-  const p = String(product || "").trim();
-  return /^https?:\/\//.test(p) ? p : `${BASE}${p.startsWith("/") ? "" : "/"}${p}`;
+export function cardUrl(product) {
+  return productUrl('yandex', product);
+}
+
+// Only the rendered spec list whose Market article matches the requested card.
+// Do not parse body text: ads and recommendation cards contain unrelated specs.
+export function parseYandexCharacteristics(expectedId, root = document) {
+  for (const section of root.querySelectorAll('[data-auto="specs-list-minimal"]')) {
+    const article = [...section.querySelectorAll('[data-auto="product-spec"]')]
+      .find((el) => el.innerText.trim() === 'Артикул Маркета');
+    const articleLines = article?.parentElement?.parentElement?.innerText.split('\n').map((line) => line.trim()).filter(Boolean);
+    if (articleLines?.length !== 2 || articleLines[1] !== expectedId) continue;
+    const entries = [...section.querySelectorAll('label')].map((row) => {
+      const lines = row.innerText.split('\n').map((line) => line.trim()).filter(Boolean);
+      return [lines[0], lines.slice(1).join(' ')];
+    }).filter(([key, value]) => key && value);
+    return { 'Артикул Маркета': expectedId, ...Object.fromEntries(entries) };
+  }
+  return {};
 }
 
 export async function yandexCard({ product }) {
-  return withPage(cardUrl(product), "yandex-card", async (page) => {
+  const url = cardUrl(product);
+  const productId = url.split('/').at(-1);
+  return withPage(url, "yandex-card", async (page) => {
     const title = await page.title();
-    const data = await page.evaluate((helpersSrc) => {
+    const data = await page.evaluate(([helpersSrc, characteristicsSrc, productId]) => {
       const { norm, prices } = new Function(`return (${helpersSrc})()`)();
       const t = norm(document.body.innerText);
       const ps = prices(t);
       const offers = (t.match(/Все (\d+) предложени/) || [])[1];
       const from = (t.match(/от\s*\n?\s*(\d{3,8})\s*\n?\s*рубл/) || [])[1];
       const seller = t.match(/\n([^\n]{2,60})\nМагазин\n(\d[.,]\d)\n([\d.,]+[Kк]?) оценок/) || [];
-      const chars = {};
-      for (const l of t.split("\n")) {
-        const m = l.trim().match(/^([^:]{2,40}): (.{1,160})$/);
-        if (m && !/^(Цена|Доставка|Рейтинг)/.test(m[1])) chars[m[1]] = m[2];
-        if (Object.keys(chars).length > 60) break;
-      }
+      const chars = new Function(`return (${characteristicsSrc})`)()(productId);
       return {
         price: ps.length ? ps[0] : null,
         priceOld: ps.length > 1 && ps[1] > ps[0] ? ps[1] : null,
@@ -109,7 +123,7 @@ export async function yandexCard({ product }) {
         noReviews: /Нет отзывов и оценок/.test(t),
         characteristics: chars,
       };
-    }, pageHelpers.toString());
+    }, [pageHelpers.toString(), parseYandexCharacteristics.toString(), productId]);
     return { url: page.url(), name: title.replace(/ — купить.*$/, "").replace(/ от продавца.*$/, ""), ...data };
   });
 }

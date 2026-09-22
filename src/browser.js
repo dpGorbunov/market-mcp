@@ -14,6 +14,7 @@ import { chromium } from "playwright";
 import { homedir } from "os";
 import { join } from "path";
 import { execFile } from "child_process";
+import { navigationSite, requestAllowed } from "./urls.js";
 
 const OZON_HOME = "https://www.ozon.ru/";
 const OZON_API = "https://www.ozon.ru/api/composer-api.bx/page/json/v2?url=";
@@ -58,6 +59,29 @@ let ozonPage = null; // stays on ozon.ru, all composer fetches run from it
 let ozonReady = false;
 let initPromise = null;
 let idleTimer = null;
+const pageSites = new WeakMap();
+
+// Playwright routes only intercept the first HTTP redirect hop. CDP checks every hop.
+export async function protectPage(ctx, page, scopes) {
+  const session = await ctx.newCDPSession(page);
+  session.on('Fetch.requestPaused', event => {
+    const allowed = requestAllowed(event.request.url, scopes.get(page), event.resourceType === 'Document');
+    session.send(allowed ? 'Fetch.continueRequest' : 'Fetch.failRequest', {
+      requestId: event.requestId, ...(allowed ? {} : {errorReason: 'BlockedByClient'}),
+    }).catch(() => {});
+  });
+  await session.send('Fetch.enable', {patterns: [{urlPattern: '*', requestStage: 'Request'}]});
+}
+
+export async function protectContext(ctx, scopes) {
+  await ctx.route('**/*', route => {
+    const request = route.request();
+    let site;
+    try { site = scopes.get(request.frame().page()); } catch { return route.abort(); }
+    return requestAllowed(request.url(), site, request.isNavigationRequest()) ? route.fallback() : route.abort();
+  });
+  await ctx.routeWebSocket('**/*', socket => socket.close());
+}
 
 function resetIdle() {
   clearTimeout(idleTimer);
@@ -70,10 +94,13 @@ async function launch() {
   hideEarly();
   context = await chromium.launchPersistentContext(PROFILE, {
     headless: HEADLESS,
+    ...(process.env.MARKET_PROXY_SERVER ? {proxy: {server: process.env.MARKET_PROXY_SERVER}} : {}),
+    serviceWorkers: 'block',
     args: LAUNCH_ARGS,
     locale: "ru-RU",
     viewport: HIDE_WINDOW ? null : { width: 1280, height: 860 }, // при скрытии окно 320x240, вьюпорт страниц задаётся ниже
   });
+  await protectContext(context, pageSites);
   context.on("close", () => {
     context = null;
     ozonPage = null;
@@ -114,6 +141,8 @@ async function ensureOzon() {
   await ensureContext();
   if (ozonReady && ozonPage && !ozonPage.isClosed()) return ozonPage;
   ozonPage = await context.newPage();
+  pageSites.set(ozonPage, 'ozon');
+  await protectPage(context, ozonPage, pageSites);
   if (HIDE_WINDOW) await ozonPage.setViewportSize({ width: 1280, height: 860 });
   await ozonPage.goto(OZON_HOME, { waitUntil: "domcontentloaded", timeout: NAV_TIMEOUT_MS });
   const title = await waitChallenge(ozonPage, "ozon");
@@ -185,9 +214,12 @@ async function fetchJsonNow(path, { retries = 2 } = {}) {
  * Вызывающий обязан закрыть страницу (page.close()) в finally.
  */
 export async function openPage(url, { label = "page", waitUntil = "domcontentloaded", settleMs = 0 } = {}) {
+  const site = navigationSite(url);
   resetIdle();
   await ensureContext();
   const page = await context.newPage();
+  pageSites.set(page, site);
+  await protectPage(context, page, pageSites);
   setWindowVisible(false);
   if (HIDE_WINDOW) await page.setViewportSize({ width: 1280, height: 860 });
   try {
