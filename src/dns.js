@@ -108,7 +108,7 @@ export async function dnsProduct({ product }) {
         // запасной путь по тексту: пары строк между "Характеристики" и "Все характеристики"/"Аксессуары"
         const lines = t.split("\n").map((l) => l.trim()).filter(Boolean);
         const start = lines.lastIndexOf("Характеристики");
-        for (let i = start + 1; i + 1 < lines.length; i += 2) {
+        for (let i = start + 1; start >= 0 && i + 1 < lines.length; i += 2) {
           if (/^(Все характеристики|Аксессуары)$/.test(lines[i])) break;
           characteristics[lines[i]] = lines[i + 1];
         }
