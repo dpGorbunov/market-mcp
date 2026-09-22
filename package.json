@@ -9,7 +9,7 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "test": "node test/parse.test.js && node test/parse_dns.test.js && node test/rank.test.js && node test/yandex.test.js && node test/urls.test.js && node test/proxy.test.js && node test/dns-product.test.js",
+    "test": "node test/parse.test.js && node test/parse_dns.test.js && node test/rank.test.js && node test/yandex.test.js && node test/urls.test.js && node test/proxy.test.js && node test/dns-product.test.js && node test/wildberries.test.js && node test/wb-native.test.js",
     "test:parse": "node test/parse.test.js",
     "check": "find src test -name '*.js' -print0 | xargs -0 -n 1 node --check"
   },
@@ -28,6 +28,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.6.1",
+    "https-proxy-agent": "7.0.6",
     "playwright": "1.60.0",
     "zod": "^3.25.0"
   }

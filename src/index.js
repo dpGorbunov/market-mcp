@@ -8,6 +8,7 @@ import { z } from "zod";
 import { search, details, reviews, filters } from "./ozon.js";
 import { dnsSearch, dnsProduct, dnsReviews } from "./dns.js";
 import { yandexSearch, yandexCard, yandexReviews } from "./yandex.js";
+import { wbCard } from "./wildberries.js";
 import { compare } from "./compare.js";
 import { filterSchema } from "./rank.js";
 import { shutdown } from "./browser.js";
@@ -46,13 +47,15 @@ function withTimeout(promise, ms, label) {
 }
 
 /** Wrap a tool body: run with timeout, serialize result, convert any failure to isError. */
-function tool(label, fn) {
+function tool(label, fn, withImage = false) {
   return async (args) => {
     try {
       const result = await withTimeout(fn(args), TOOL_TIMEOUT_MS, label);
+      const image = withImage ? result.imageContent : undefined;
+      if (withImage) delete result.imageContent;
       let text = JSON.stringify(COMPACT ? shrink(result) : result, null, COMPACT ? 0 : 2);
       if (text.length > MAX_TEXT) text = text.slice(0, MAX_TEXT) + "\n…(truncated)";
-      return { content: [{ type: "text", text }] };
+      return { content: [{ type: "text", text }, ...(image ? [image] : [])] };
     } catch (err) {
       log(`${label} error:`, err?.message);
       return {
@@ -101,6 +104,17 @@ server.registerTool(
     annotations: { readOnlyHint: true, openWorldHint: true, idempotentHint: true },
   },
   tool("ozon_filters", filters)
+);
+
+server.registerTool(
+  "wb_card",
+  {
+    title: "Get Wildberries public product card",
+    description: "Read anonymous public WB card JSON: name, item dimensions in millimetres with source values, and a verified image URL. Accepts SKU or canonical wildberries.ru product URL. Missing item dimensions remain unknown; package dimensions are never substituted. CDN routing failures are errors, with no host scanning. Use include_image=true for visual modeling: attaches the first verified photo as MCP image content (max 8MiB JPEG/WebP). Does not provide price or reviews.",
+    inputSchema: {product: z.string().min(1).describe("Wildberries SKU or full product URL"), include_image:z.boolean().default(false)},
+    annotations: {readOnlyHint: true, openWorldHint: true, idempotentHint: true},
+  },
+  tool("wb_card", wbCard, true)
 );
 
 server.registerTool(
