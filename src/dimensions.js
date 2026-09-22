@@ -2,7 +2,11 @@
 // Packaging and built-in sizes are never substituted for a missing item size (see warnings).
 const UNIT_MM = { 'мм': 1, 'см': 10, 'м': 1000 };
 const PACKAGE_WORD = /упаковк|встраивани|короб/i;
-const AXIS_WORDS = { width: /^ширина(?![а-яё])/i, depth: /^глубина(?![а-яё])/i, height: /^высота(?![а-яё])/i };
+// Only the whole item: "Высота", "Высота изделия", "Высота, см". Seat, back, sleeping place or niche sizes
+// ("Высота сиденья", "Ширина ниши") never stand in for the overall size, whatever order the page lists them in.
+const ITEM = String.raw`(?:\s+(?:изделия|предмета|товара|общая))?(?:\s*\(?(?:мм|см|м)\)?)?`;
+const AXIS_WORDS = Object.fromEntries(Object.entries({ width: 'ширина', depth: 'глубина', height: 'высота' })
+  .map(([axis, word]) => [axis, new RegExp(`^${word}${ITEM}$`, 'i')]));
 const LETTER_AXIS = { 'ш': 'width', 'г': 'depth', 'д': 'depth', 'в': 'height' };
 const NUMBER = String.raw`(\d+(?:[.,]\d+)?)`;
 const TRIPLET = new RegExp(`^${NUMBER}\\s*[xх×*]\\s*${NUMBER}\\s*[xх×*]\\s*${NUMBER}\\s*(мм|см|м)?$`, 'i');
@@ -23,16 +27,16 @@ export function parseLengthMm(text, keyUnit = null) {
 function splitKey(key) {
   const title = String(key).split(' / ').at(-1).trim();
   const unit = title.match(/,\s*(мм|см|м)\s*$/i)?.[1] || null;
-  return { title, unit };
+  return { title, unit, name: title.replace(/,\s*(мм|см|м)\s*$/i, '').trim() };
 }
 
 export function dimensionsFromLabeled(characteristics) {
   const dimensions_mm = { width: null, depth: null, height: null };
   for (const [key, value] of Object.entries(characteristics || {})) {
     if (PACKAGE_WORD.test(key)) continue;
-    const { title, unit } = splitKey(key);
+    const { name, unit } = splitKey(key);
     for (const [axis, re] of Object.entries(AXIS_WORDS)) {
-      if (dimensions_mm[axis] == null && re.test(title)) dimensions_mm[axis] = parseLengthMm(value, unit);
+      if (dimensions_mm[axis] == null && re.test(name)) dimensions_mm[axis] = parseLengthMm(value, unit);
     }
   }
   return dimensions_mm;
