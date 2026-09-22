@@ -19,6 +19,12 @@ chromium.launchPersistentContext = async (...args) => {
       if (url.includes('/embed-only/')) body = '<title>Технические характеристики Встраиваемая панель | DNS</title><p>15999 ₽</p><h2>Характеристики</h2><div>Ширина встраивания</div><div>560 мм</div><h2>Аксессуары</h2>';
       if (url.includes('/yandex-good/')) body = '<title>Стол кухонный — купить на Яндекс Маркете</title><meta property="og:image" content="https://avatars.mds.yandex.net/table.jpg"><h1>Стол кухонный</h1><div data-auto="specs-list-minimal"><div aria-label="Характеристики"><div><div><div><span data-auto="product-spec">Артикул Маркета</span></div><div></div><div><span>4707220787</span></div></div></div><div><label><div><span>Размеры (ДхШхВ)</span></div><div></div><div><span>90x150x75 см</span></div></label></div></div></div>';
       if (url.includes('/empty/')) body = '<title>Xiaomi | DNS</title><p>Нет описания</p><p>389 мм</p>';
+      // Qrator: the first visit answers 401 with a JS challenge that reloads into the real page.
+      if (url.includes('/js-reload/') && !url.includes('passed=1')) {
+        return route.fulfill({status: 401, contentType: 'text/html; charset=utf-8',
+          body: "<title>DNS</title><script>setTimeout(() => location.replace(location.pathname + '?passed=1'), 300)</script>"});
+      }
+      if (url.includes('/js-reload/')) body = '<title>Технические характеристики Reload Fridge | DNS</title><p>11999 ₽</p><h2>Характеристики</h2><div>Ширина</div><div>480 мм</div><h2>Аксессуары</h2>';
       return route.fulfill({status: url.includes('/status403/') ? 403 : 200, contentType: 'text/html; charset=utf-8', body});
     });
     return page;

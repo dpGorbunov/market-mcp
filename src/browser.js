@@ -23,6 +23,7 @@ const HEADLESS = process.env.MARKET_HEADLESS === "true";
 const CAPTCHA_WAIT_MS = 1000 * Number(process.env.MARKET_CAPTCHA_WAIT_S || 120);
 const IDLE_TIMEOUT_MS = 60 * 1000 * Number(process.env.MARKET_IDLE_MIN || 720);
 const NAV_TIMEOUT_MS = 90000;
+const CHALLENGE_RELOAD_MS = 1000 * Number(process.env.MARKET_CHALLENGE_RELOAD_S || 15);
 
 // Титулы страниц-заглушек антибота у всех площадок.
 const CHALLENGE = /antibot|доступ ограничен|нет соединения|captcha|проверка браузера|qrator|robot|вы\s+не\s+робот|attention required|access denied/i;
@@ -33,8 +34,14 @@ const CHALLENGE = /antibot|доступ ограничен|нет соедине
 const HIDE_WINDOW = process.env.MARKET_HIDE_WINDOW !== "0" && process.platform === "darwin";
 // Окно всё равно создаётся на долю секунды до скрытия: делаем его маленьким и просим положить
 // в дальний угол (macOS подтянет к краю экрана). На вёрстку не влияет: вьюпорт задаёт Playwright.
-const LAUNCH_ARGS = ["--disable-blink-features=AutomationControlled", "--no-first-run", "--no-default-browser-check", "--mute-audio",
-  ...(HIDE_WINDOW ? ["--window-position=20000,20000", "--window-size=320,240"] : [])];
+// Без оконного менеджера (серверный Xvfb) окно встаёт в (10,10), и антибот Ozon такой браузер не
+// пропускает (проверено 2026-09-22); вне macOS ставим окну обычную позицию на рабочем столе.
+export function launchArgs(platform, hideWindow) {
+  const position = hideWindow ? ["--window-position=20000,20000", "--window-size=320,240"]
+    : platform === "darwin" ? [] : ["--window-position=76,42"];
+  return ["--disable-blink-features=AutomationControlled", "--no-first-run", "--no-default-browser-check", "--mute-audio", ...position];
+}
+const LAUNCH_ARGS = launchArgs(process.platform, HIDE_WINDOW);
 
 const BROWSER_PROC = '(every process whose name contains "Chrome for Testing" or name is "Chromium")';
 
@@ -228,9 +235,18 @@ export async function openPage(url, { label = "page", waitUntil = "domcontentloa
   await protectPage(context, page, pageSites);
   setWindowVisible(false);
   if (HIDE_WINDOW) await page.setViewportSize({ width: 1280, height: 860 });
+  // Qrator (DNS) answers the first visit with 401 and a JS challenge that reloads into the real page;
+  // only an error status that never turns into a normal document is a block.
+  const recovered = page.waitForResponse((r) => r.request().isNavigationRequest() && r.frame() === page.mainFrame() && r.status() < 400,
+    { timeout: NAV_TIMEOUT_MS + CHALLENGE_RELOAD_MS });
+  recovered.catch(() => {});
   try {
     const response = await page.goto(url, { waitUntil, timeout: NAV_TIMEOUT_MS });
-    if (["dns", "yandex"].includes(site) && response && response.status() >= 400) throw new Error(`${label}: HTTP ${response.status()}`);
+    if (["dns", "yandex"].includes(site) && response && response.status() >= 400) {
+      const reload = await Promise.race([recovered, page.waitForTimeout(CHALLENGE_RELOAD_MS).then(() => null)]);
+      if (!reload) throw new Error(`${label}: HTTP ${response.status()}`);
+      await page.waitForLoadState(waitUntil, { timeout: NAV_TIMEOUT_MS });
+    }
     await waitChallenge(page, label);
     if (settleMs) await page.waitForTimeout(settleMs);
     if (["dns", "yandex"].includes(site)) {

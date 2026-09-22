@@ -65,3 +65,11 @@ await new Promise((r) => setTimeout(r, 0));
 assert.equal(popupSession.sent.at(-1).method, 'Fetch.failRequest', 'unscoped page navigation blocked');
 
 console.log('protectPage CDP interception (no ctx.route) passed');
+
+// Without a window manager (server Xvfb) Chromium sits at (10,10), which Ozon's anti-bot rejects
+// (verified 2026-09-22). Off macOS the window gets an ordinary desktop position.
+const { launchArgs } = await import('../src/browser.js');
+assert.ok(launchArgs('linux', false).includes('--window-position=76,42'));
+assert.ok(launchArgs('darwin', true).includes('--window-position=20000,20000'), 'macOS hides the window off-screen');
+assert.ok(!launchArgs('darwin', false).some((a) => a.startsWith('--window-position')), 'visible macOS window keeps OS placement');
+console.log('launch window position passed');

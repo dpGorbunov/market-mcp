@@ -8,7 +8,7 @@ import {StdioClientTransport} from '@modelcontextprotocol/sdk/client/stdio.js';
 const folder = await mkdtemp(join(tmpdir(), 'dns-fixture-'));
 const transport = new StdioClientTransport({command: process.execPath,
   args: ['--import', fileURLToPath(new URL('./fixtures/dns-browser.js', import.meta.url)), 'src/index.js'],
-  env: {...process.env, MARKET_PROFILE_DIR: folder, MARKET_HEADLESS: 'true', MARKET_CAPTCHA_WAIT_S: '0', MARKET_COMPACT: '0'},
+  env: {...process.env, MARKET_PROFILE_DIR: folder, MARKET_HEADLESS: 'true', MARKET_CAPTCHA_WAIT_S: '0', MARKET_CHALLENGE_RELOAD_S: '3', MARKET_COMPACT: '0'},
   stderr: 'ignore'});
 const client = new Client({name: 'dns-regression', version: '1'});
 try {
@@ -31,6 +31,9 @@ try {
   const embed = JSON.parse((await client.callTool({name: 'dns_product', arguments: {product: 'https://www.dns-shop.ru/product/f4c6689d51faed20/embed-only/'}})).content[0].text);
   assert.deepEqual(embed.dimensions_mm, {width: null, depth: null, height: null}, 'built-in width is never used as item width');
   assert.deepEqual(embed.warnings, ['Item dimensions are incomplete; packaging dimensions were not substituted.']);
+  const qrator = await client.callTool({name: 'dns_product', arguments: {product: 'https://www.dns-shop.ru/product/f4c6689d51faed20/js-reload/'}});
+  assert(!qrator.isError, 'Qrator 401 challenge that reloads into the page is not a block: ' + qrator.content[0].text);
+  assert.equal(JSON.parse(qrator.content[0].text).name, 'Reload Fridge');
   const empty = await client.callTool({name: 'dns_product', arguments: {product: 'https://www.dns-shop.ru/product/f4c6689d51faed20/empty/'}});
   assert.deepEqual(JSON.parse(empty.content[0].text).characteristics, {});
   for (const slug of ['status403', 'soft403', 'captcha', 'russian-robot', 'russian-title', 'captcha-url']) {
@@ -53,7 +56,7 @@ try {
 // Default compact output drops nulls; dimensions_mm must still carry every axis explicitly.
 const compactTransport = new StdioClientTransport({command: process.execPath,
   args: ['--import', fileURLToPath(new URL('./fixtures/dns-browser.js', import.meta.url)), 'src/index.js'],
-  env: {...process.env, MARKET_PROFILE_DIR: folder + '-compact', MARKET_HEADLESS: 'true', MARKET_CAPTCHA_WAIT_S: '0'},
+  env: {...process.env, MARKET_PROFILE_DIR: folder + '-compact', MARKET_HEADLESS: 'true', MARKET_CAPTCHA_WAIT_S: '0', MARKET_CHALLENGE_RELOAD_S: '3'},
   stderr: 'ignore'});
 const compactClient = new Client({name: 'dns-compact', version: '1'});
 try {
