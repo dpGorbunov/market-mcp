@@ -35,6 +35,12 @@ console.error("   ", Object.keys(fc).length, "chars, e.g.", JSON.stringify(Objec
 check(Object.keys(fc).length >= 20, "features page gives 20+ characteristics");
 check(fc["Количество конфорок"] === "2" && fc["Системы защиты"]?.includes("Защита от перегрева"), "short and long values joined");
 
+console.error("── ozon card dimensions (details() merge) ──");
+const { withItemDimensions } = await import("../src/dimensions.js");
+const card = withItemDimensions({ ...d, characteristics: fc }, d.images[0]);
+check(JSON.stringify(card.dimensions_mm) === JSON.stringify({ width: 306, depth: 527, height: 51 }), `ozon dimensions_mm ${JSON.stringify(card.dimensions_mm)}`);
+check(card.image_url === d.images[0] && !!card.image_url, "ozon image_url is the first product image");
+
 console.error("── parseReviews ──");
 const r = parseReviews(load("reviews.json"), 10);
 console.error("   ", JSON.stringify({ rating: r.rating, total: r.totalReviews, count: r.count }));

@@ -5,7 +5,7 @@ const PACKAGE_WORD = /упаковк|встраивани|короб/i;
 const AXIS_WORDS = { width: /^ширина(?![а-яё])/i, depth: /^глубина(?![а-яё])/i, height: /^высота(?![а-яё])/i };
 const LETTER_AXIS = { 'ш': 'width', 'г': 'depth', 'д': 'depth', 'в': 'height' };
 const NUMBER = String.raw`(\d+(?:[.,]\d+)?)`;
-const TRIPLET = new RegExp(`^${NUMBER}\\s*[xх×*]\\s*${NUMBER}\\s*[xх×*]\\s*${NUMBER}\\s*(мм|см|м)$`, 'i');
+const TRIPLET = new RegExp(`^${NUMBER}\\s*[xх×*]\\s*${NUMBER}\\s*[xх×*]\\s*${NUMBER}\\s*(мм|см|м)?$`, 'i');
 
 const round = (mm) => Math.round(mm * 100) / 100;
 const toNumber = (text) => Number(String(text).replace(',', '.'));
@@ -38,31 +38,66 @@ export function dimensionsFromLabeled(characteristics) {
   return dimensions_mm;
 }
 
-/** "90x150x75 см": axes follow the Ш/Г/Д/В letters of the label; without letters W×D×H (Yandex "Размеры"). */
-export function dimensionsFromTriplet(label, value) {
-  const dimensions_mm = { width: null, depth: null, height: null };
+const LETTERS = /([ШГДВ])\s*[xх×*]\s*([ШГДВ])\s*[xх×*]\s*([ШГДВ])/i;
+const AXES = ['width', 'depth', 'height'];
+
+/** Three lengths in mm from "90x150x75 см", or from a bare "527х306х51" when the key names the unit. */
+function tripletMm(value, keyUnit) {
   const m = String(value || '').trim().match(TRIPLET);
-  if (!m) return dimensions_mm;
-  const pattern = String(label || '').match(/([ШГДВ])\s*[xх×*]\s*([ШГДВ])\s*[xх×*]\s*([ШГДВ])/i);
-  const axes = pattern ? pattern.slice(1).map((l) => LETTER_AXIS[l.toLowerCase()]) : ['width', 'depth', 'height'];
+  const unit = m && (m[4] || keyUnit);
+  return unit ? [m[1], m[2], m[3]].map((n) => round(toNumber(n) * UNIT_MM[unit.toLowerCase()])) : null;
+}
+
+/** "90x150x75 см": axes follow the Ш/Г/Д/В letters of the label; without letters W×D×H (Yandex "Размеры"). */
+export function dimensionsFromTriplet(label, value, keyUnit = null) {
+  const dimensions_mm = { width: null, depth: null, height: null };
+  const numbers = tripletMm(value, keyUnit);
+  if (!numbers) return dimensions_mm;
+  const pattern = String(label || '').match(LETTERS);
+  const axes = pattern ? pattern.slice(1).map((l) => LETTER_AXIS[l.toLowerCase()]) : AXES;
   if (new Set(axes).size !== 3) return dimensions_mm;
-  const unit = UNIT_MM[m[4].toLowerCase()];
-  axes.forEach((axis, i) => { dimensions_mm[axis] = round(toNumber(m[i + 1]) * unit); });
+  axes.forEach((axis, i) => { dimensions_mm[axis] = numbers[i]; });
   return dimensions_mm;
 }
 
-function merge(...sources) {
-  const out = { width: null, depth: null, height: null };
-  for (const src of sources) for (const axis of Object.keys(out)) if (out[axis] == null && src[axis] != null) out[axis] = src[axis];
-  return out;
+/**
+ * A letterless triplet's order is unknown when labeled axes exist (Ozon lists D×W×H). Known axes
+ * are matched out of it; a single remaining number fills a single missing axis. A triplet that
+ * does not contain the known values is ignored.
+ */
+function fillFromLetterless(known, numbers) {
+  const missing = AXES.filter((axis) => known[axis] == null);
+  const rest = [...numbers];
+  for (const axis of AXES) {
+    if (known[axis] == null) continue;
+    const i = rest.findIndex((n) => Math.abs(n - known[axis]) <= 1);
+    if (i < 0) return known;
+    rest.splice(i, 1);
+  }
+  return missing.length === 1 && rest.length === 1 ? { ...known, [missing[0]]: rest[0] } : known;
 }
 
 /** Labeled axes take priority over "Размеры"/"Габариты" triplets. */
 export function dimensionsFromAny(characteristics) {
-  const triplets = Object.entries(characteristics || {})
-    .filter(([key]) => !PACKAGE_WORD.test(key) && /размер|габарит/i.test(splitKey(key).title))
-    .map(([key, value]) => dimensionsFromTriplet(splitKey(key).title, value));
-  return merge(dimensionsFromLabeled(characteristics), ...triplets);
+  let out = dimensionsFromLabeled(characteristics);
+  const anyKnown = AXES.some((axis) => out[axis] != null);
+  for (const [key, value] of Object.entries(characteristics || {})) {
+    const { title, unit } = splitKey(key);
+    if (PACKAGE_WORD.test(key) || !/размер|габарит/i.test(title)) continue;
+    if (LETTERS.test(title) || !anyKnown) {
+      const triplet = dimensionsFromTriplet(title, value, unit);
+      out = Object.fromEntries(AXES.map((axis) => [axis, out[axis] ?? triplet[axis]]));
+    } else {
+      const numbers = tripletMm(value, unit);
+      if (numbers) out = fillFromLetterless(out, numbers);
+    }
+  }
+  return out;
+}
+
+export function withItemDimensions(card, imageUrl) {
+  const dimensions_mm = dimensionsFromAny(card.characteristics);
+  return { ...card, dimensions_mm, image_url: imageUrl || null, warnings: dimensionsWarning(dimensions_mm) };
 }
 
 export function dimensionsWarning(dimensions_mm) {

@@ -22,6 +22,8 @@ const MAX_TEXT = 60000; // cap JSON-RPC payload size
 const COMPACT = process.env.MARKET_COMPACT !== "0";
 const MAX_STR = Number(process.env.MARKET_MAX_STR || 600);
 const DROP_KEYS = new Set(["images", "specsText"]);
+// Explicit nulls are meaningful here: an unknown axis must stay visible, not vanish.
+const KEEP_AS_IS = new Set(["dimensions_mm"]);
 
 function shrink(v) {
   if (typeof v === "string") return v.length > MAX_STR ? v.slice(0, MAX_STR) + "…" : v;
@@ -29,6 +31,7 @@ function shrink(v) {
   if (v && typeof v === "object") {
     const out = {};
     for (const [k, x] of Object.entries(v)) {
+      if (KEEP_AS_IS.has(k)) { out[k] = x; continue; }
       if (DROP_KEYS.has(k) || x == null || x === "" || (Array.isArray(x) && !x.length)) continue;
       out[k] = shrink(x);
     }

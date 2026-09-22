@@ -36,6 +36,19 @@ assert.deepEqual(dimensionsFromAny({ 'Размеры (ДхШхВ)': '90x150x75 �
 assert.deepEqual(dimensionsFromAny({ 'Ширина': '400 мм', 'Размеры (ШхГхВ)': '40x60x80 см' }), { width: 400, depth: 600, height: 800 });
 assert.deepEqual(dimensionsFromAny({ 'Размеры упаковки': '100x50x50 см' }), NONE);
 
+// Real Ozon hob card: unit in the key, letterless triplet in D×W×H order. Known labeled axes are
+// matched out of the triplet, the remaining number fills the missing axis.
+assert.deepEqual(dimensionsFromAny({ 'Ширина, см': '30.6', 'Глубина, см': '52.7', 'Ширина встраивания, см': '27', 'Размеры, мм': '527х306х51' }),
+  { width: 306, depth: 527, height: 51 });
+// Letterless triplet that disagrees with a labeled axis is not trusted for the other axes.
+assert.deepEqual(dimensionsFromAny({ 'Ширина, см': '100', 'Размеры': '80x40x90 см' }), { width: 1000, depth: null, height: null });
+
+// withItemDimensions decorates a card with dimensions_mm, image_url and warnings.
+const { withItemDimensions } = await import('../src/dimensions.js');
+assert.deepEqual(withItemDimensions({ name: 'x', characteristics: { 'Размеры': '80.1x39x97.8 см' } }, 'https://img/x.jpg'),
+  { name: 'x', characteristics: { 'Размеры': '80.1x39x97.8 см' }, dimensions_mm: { width: 801, depth: 390, height: 978 }, image_url: 'https://img/x.jpg', warnings: [] });
+assert.equal(withItemDimensions({ characteristics: {} }, undefined).image_url, null);
+
 assert.deepEqual(dimensionsWarning({ width: 1, depth: 1, height: 1 }), []);
 assert.deepEqual(dimensionsWarning({ width: 1, depth: null, height: 1 }), ['Item dimensions are incomplete; packaging dimensions were not substituted.']);
 
