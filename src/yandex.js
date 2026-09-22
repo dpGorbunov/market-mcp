@@ -4,6 +4,7 @@
 import { openPage, queued } from "./browser.js";
 import { refine } from "./rank.js";
 import { productUrl } from "./urls.js";
+import { withItemDimensions } from "./dimensions.js";
 
 const BASE = "https://market.yandex.ru";
 
@@ -122,9 +123,11 @@ export async function yandexCard({ product }) {
         seller: seller[1] ? { name: seller[1], rating: Number(seller[2].replace(",", ".")), ratings: seller[3] } : null,
         noReviews: /Нет отзывов и оценок/.test(t),
         characteristics: chars,
+        image: document.querySelector('meta[property="og:image"]')?.content || null,
       };
     }, [pageHelpers.toString(), parseYandexCharacteristics.toString(), productId]);
-    return { url: page.url(), name: title.replace(/ — купить.*$/, "").replace(/ от продавца.*$/, ""), ...data };
+    const { image, ...card } = data;
+    return withItemDimensions({ url: page.url(), name: title.replace(/ — купить.*$/, "").replace(/ от продавца.*$/, ""), ...card }, image);
   });
 }
 

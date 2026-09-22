@@ -71,6 +71,7 @@ try {
   assert(!reached.some(url => url.includes('127.0.0.1')));
   assert(!reached.includes(good.ozon));
   const unscoped = await context.newPage();
+  await protectPage(context, unscoped, scopes); // guard from the page listener, awaited for determinism
   await assert.rejects(unscoped.goto(good.yandex));
   assert(!reached.includes(good.yandex));
   console.log('Browser redirects blocked before downstream request; CDN resources retained');

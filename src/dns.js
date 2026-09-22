@@ -4,6 +4,7 @@ import { openPage, queued } from "./browser.js";
 import { parseDnsOpinions } from "./parse_dns.js";
 import { parseCardSpecs, refine } from "./rank.js";
 import { productUrl } from "./urls.js";
+import { withItemDimensions } from "./dimensions.js";
 
 const BASE = "https://www.dns-shop.ru";
 const SORT_MAP = { popular: "", rating: "rating", price: "price-asc", price_desc: "price-desc", new: "new", discount: "discount" };
@@ -113,10 +114,12 @@ export async function dnsProduct({ product }) {
           characteristics[lines[i]] = lines[i + 1];
         }
       }
-      return { price: pm ? Number(pm[1]) : null, rating: rm ? Number(rm[1].replace(",", ".")) : null, reviews: rm ? Number(rm[2]) : null, characteristics };
+      const image = document.querySelector('meta[property="og:image"]')?.content || null;
+      return { price: pm ? Number(pm[1]) : null, rating: rm ? Number(rm[1].replace(",", ".")) : null, reviews: rm ? Number(rm[2]) : null, characteristics, image };
     });
     const title = await page.title();
-    return { url: `${BASE}/product/${key}`, name: title.replace(/^Технические характеристики\s*/i, "").split("|")[0].trim(), ...data };
+    const { image, ...card } = data;
+    return withItemDimensions({ url: `${BASE}/product/${key}`, name: title.replace(/^Технические характеристики\s*/i, "").split("|")[0].trim(), ...card }, image);
   });
 }
 

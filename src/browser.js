@@ -23,6 +23,7 @@ const HEADLESS = process.env.MARKET_HEADLESS === "true";
 const CAPTCHA_WAIT_MS = 1000 * Number(process.env.MARKET_CAPTCHA_WAIT_S || 120);
 const IDLE_TIMEOUT_MS = 60 * 1000 * Number(process.env.MARKET_IDLE_MIN || 720);
 const NAV_TIMEOUT_MS = 90000;
+const CHALLENGE_RELOAD_MS = 1000 * Number(process.env.MARKET_CHALLENGE_RELOAD_S || 15);
 
 // Титулы страниц-заглушек антибота у всех площадок.
 const CHALLENGE = /antibot|доступ ограничен|нет соединения|captcha|проверка браузера|qrator|robot|вы\s+не\s+робот|attention required|access denied/i;
@@ -33,8 +34,14 @@ const CHALLENGE = /antibot|доступ ограничен|нет соедине
 const HIDE_WINDOW = process.env.MARKET_HIDE_WINDOW !== "0" && process.platform === "darwin";
 // Окно всё равно создаётся на долю секунды до скрытия: делаем его маленьким и просим положить
 // в дальний угол (macOS подтянет к краю экрана). На вёрстку не влияет: вьюпорт задаёт Playwright.
-const LAUNCH_ARGS = ["--disable-blink-features=AutomationControlled", "--no-first-run", "--no-default-browser-check", "--mute-audio",
-  ...(HIDE_WINDOW ? ["--window-position=20000,20000", "--window-size=320,240"] : [])];
+// Без оконного менеджера (серверный Xvfb) окно встаёт в (10,10), и антибот Ozon такой браузер не
+// пропускает (проверено 2026-09-22); вне macOS ставим окну обычную позицию на рабочем столе.
+export function launchArgs(platform, hideWindow) {
+  const position = hideWindow ? ["--window-position=20000,20000", "--window-size=320,240"]
+    : platform === "darwin" ? [] : ["--window-position=76,42"];
+  return ["--disable-blink-features=AutomationControlled", "--no-first-run", "--no-default-browser-check", "--mute-audio", ...position];
+}
+const LAUNCH_ARGS = launchArgs(process.platform, HIDE_WINDOW);
 
 const BROWSER_PROC = '(every process whose name contains "Chrome for Testing" or name is "Chromium")';
 
@@ -61,8 +68,16 @@ let initPromise = null;
 let idleTimer = null;
 const pageSites = new WeakMap();
 
+const guards = new WeakMap();
+
 // Playwright routes only intercept the first HTTP redirect hop. CDP checks every hop.
-export async function protectPage(ctx, page, scopes) {
+// Idempotent: a page already guarded (e.g. by protectContext's page listener) is not guarded twice.
+export function protectPage(ctx, page, scopes) {
+  if (!guards.has(page)) guards.set(page, guard(ctx, page, scopes));
+  return guards.get(page);
+}
+
+async function guard(ctx, page, scopes) {
   const session = await ctx.newCDPSession(page);
   session.on('Fetch.requestPaused', event => {
     const allowed = requestAllowed(event.request.url, scopes.get(page), event.resourceType === 'Document');
@@ -73,13 +88,11 @@ export async function protectPage(ctx, page, scopes) {
   await session.send('Fetch.enable', {patterns: [{urlPattern: '*', requestStage: 'Request'}]});
 }
 
+// Every page, including ones the site opens itself, gets the CDP guard; unscoped pages cannot
+// navigate. A context-wide ctx.route here made Ozon's composer-api answer 403 (verified on the
+// GPU host 2026-09-22), so it is intentionally absent.
 export async function protectContext(ctx, scopes) {
-  await ctx.route('**/*', route => {
-    const request = route.request();
-    let site;
-    try { site = scopes.get(request.frame().page()); } catch { return route.abort(); }
-    return requestAllowed(request.url(), site, request.isNavigationRequest()) ? route.fallback() : route.abort();
-  });
+  ctx.on('page', page => { protectPage(ctx, page, scopes).catch(() => {}); });
   await ctx.routeWebSocket('**/*', socket => socket.close());
 }
 
@@ -222,9 +235,18 @@ export async function openPage(url, { label = "page", waitUntil = "domcontentloa
   await protectPage(context, page, pageSites);
   setWindowVisible(false);
   if (HIDE_WINDOW) await page.setViewportSize({ width: 1280, height: 860 });
+  // Qrator (DNS) answers the first visit with 401 and a JS challenge that reloads into the real page;
+  // only an error status that never turns into a normal document is a block.
+  const recovered = page.waitForResponse((r) => r.request().isNavigationRequest() && r.frame() === page.mainFrame() && r.status() < 400,
+    { timeout: NAV_TIMEOUT_MS + CHALLENGE_RELOAD_MS });
+  recovered.catch(() => {});
   try {
     const response = await page.goto(url, { waitUntil, timeout: NAV_TIMEOUT_MS });
-    if (["dns", "yandex"].includes(site) && response && response.status() >= 400) throw new Error(`${label}: HTTP ${response.status()}`);
+    if (["dns", "yandex"].includes(site) && response && response.status() >= 400) {
+      const reload = await Promise.race([recovered, page.waitForTimeout(CHALLENGE_RELOAD_MS).then(() => null)]);
+      if (!reload) throw new Error(`${label}: HTTP ${response.status()}`);
+      await page.waitForLoadState(waitUntil, { timeout: NAV_TIMEOUT_MS });
+    }
     await waitChallenge(page, label);
     if (settleMs) await page.waitForTimeout(settleMs);
     if (["dns", "yandex"].includes(site)) {

@@ -3,6 +3,7 @@ import { fetchJson, openPage, queued } from "./browser.js";
 import { parseSearch, parseDetails, parseReviews, parseFilters, parseFullCharacteristics } from "./parse.js";
 import { refine } from "./rank.js";
 import { productUrl } from "./urls.js";
+import { withItemDimensions } from "./dimensions.js";
 
 const SORT_MAP = {
   popular: "",
@@ -131,11 +132,11 @@ export async function details({ product, description = true }) {
   ]);
   const d = parseDetails(basePage);
   const full = features ? parseFullCharacteristics(features) : {};
-  return {
+  return withItemDimensions({
     ...d,
     characteristics: Object.keys(full).length ? full : d.characteristics,
     description: descr || { text: "", images: [], skipped: true },
-  };
+  }, d.images[0]);
 }
 
 const REVIEW_SORT = { newest: "published_at_desc", best: "score_desc", worst: "score_asc" };
