@@ -24,6 +24,15 @@ assert.deepEqual(dimensionsFromLabeled({ 'Ширина встраивания, �
 assert.deepEqual(dimensionsFromLabeled({ 'Ширина упаковки, см': '90' }), NONE);
 assert.deepEqual(dimensionsFromLabeled({ 'Упаковка / Ширина': '900 мм' }), NONE);
 
+// Part sizes (seat, back, sleeping place, niche) are never the item's overall size, whatever the key order.
+assert.deepEqual(dimensionsFromLabeled({ 'Высота сиденья, см': '45', 'Глубина сиденья, см': '55', 'Ширина спального места, см': '160',
+  'Ширина, см': '220', 'Глубина, см': '95', 'Высота, см': '85' }), { width: 2200, depth: 950, height: 850 });
+assert.deepEqual(dimensionsFromLabeled({ 'Ширина ниши, мм': '600', 'Высота спинки, см': '40', 'Высота ножек, см': '12',
+  'Ширина, мм': '595', 'Глубина, мм': '650', 'Высота, мм': '1850' }), { width: 595, depth: 650, height: 1850 });
+assert.deepEqual(dimensionsFromLabeled({ 'Ширина изделия, см': '120', 'Глубина изделия, см': '40', 'Высота изделия, см': '80' }),
+  { width: 1200, depth: 400, height: 800 });
+assert.deepEqual(dimensionsFromLabeled({ 'Высота сиденья, см': '45' }), NONE);
+
 // Triplets: letters in the label decide the axes (Д and Г are depth).
 assert.deepEqual(dimensionsFromTriplet('Размеры (ДхШхВ)', '90x150x75 см'), { width: 1500, depth: 900, height: 750 });
 assert.deepEqual(dimensionsFromTriplet('Габариты (ШхГхВ)', '40×60×80 см'), { width: 400, depth: 600, height: 800 });
