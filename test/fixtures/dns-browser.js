@@ -11,6 +11,9 @@ chromium.launchPersistentContext = async (...args) => {
       const url = route.request().url();
       if (!url.startsWith('https://www.dns-shop.ru/') && !url.startsWith('https://market.yandex.ru/')) return route.abort();
       let body = url.startsWith("https://market.yandex.ru/") ? "<title>403</title><h1>Forbidden</h1>" : forbidden;
+      if (url.includes('/russian-robot/')) body = '<title>Яндекс Маркет</title><h1>Вы не робот?</h1>';
+      if (url.includes('/captcha-url/')) body = "<title>Яндекс</title><main>Продолжить</main><script>history.replaceState({}, '', '/showcaptcha?retpath=fixture')</script>";
+      if (url.includes('/russian-title/')) body = '<title>Вы не робот?</title><main>Продолжить</main>';
       if (url.includes('/captcha/')) body = '<title>DNS</title><p>Подтвердите, что вы не робот</p><p>captcha</p>';
       if (url.includes('/good/')) body = '<title>Технические характеристики Xiaomi Air Fryer | DNS</title><p>8999 ₽</p><h2>Характеристики</h2><div>Ширина</div><div>389 мм</div><h2>Аксессуары</h2>';
       if (url.includes('/yandex-good/')) body = '<title>Стол кухонный — купить на Яндекс Маркете</title><h1>Стол кухонный</h1>';
