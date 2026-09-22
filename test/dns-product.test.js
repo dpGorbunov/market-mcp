@@ -27,7 +27,7 @@ try {
   assert.equal(data.characteristics['Ширина'], '389 мм');
   const empty = await client.callTool({name: 'dns_product', arguments: {product: 'https://www.dns-shop.ru/product/f4c6689d51faed20/empty/'}});
   assert.deepEqual(JSON.parse(empty.content[0].text).characteristics, {});
-  for (const slug of ['status403', 'soft403', 'captcha']) {
+  for (const slug of ['status403', 'soft403', 'captcha', 'russian-robot', 'russian-title', 'captcha-url']) {
     const result = await client.callTool({name: 'yandex_card', arguments: {product: `https://market.yandex.ru/card/${slug}/4707220787`}});
     assert.equal(result.isError, true, `Yandex ${slug} must be a native MCP error`);
     assert.match(result.content[0].text, /HTTP 403|blocked|challenge/i);

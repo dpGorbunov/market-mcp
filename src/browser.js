@@ -25,7 +25,7 @@ const IDLE_TIMEOUT_MS = 60 * 1000 * Number(process.env.MARKET_IDLE_MIN || 720);
 const NAV_TIMEOUT_MS = 90000;
 
 // Титулы страниц-заглушек антибота у всех площадок.
-const CHALLENGE = /antibot|доступ ограничен|нет соединения|captcha|проверка браузера|qrator|robot|attention required|access denied/i;
+const CHALLENGE = /antibot|доступ ограничен|нет соединения|captcha|проверка браузера|qrator|robot|вы\s+не\s+робот|attention required|access denied/i;
 
 // Окно нужно антиботам, но пользователю не нужно. Уводить его за экран macOS не даёт (возвращает
 // на экран), поэтому после запуска прячем процесс Chromium как по Cmd+H через System Events
@@ -230,8 +230,9 @@ export async function openPage(url, { label = "page", waitUntil = "domcontentloa
     if (["dns", "yandex"].includes(site)) {
       const title = await page.title();
       const text = await page.locator("body").innerText();
-      if (/^(?:HTTP\s*)?[45]\d\d\b|forbidden|access denied|captcha|доступ.*(?:запрещен|ограничен)/i.test(title)
-          || /доступ к сайту[^\n]*(?:запрещен|ограничен)|подтвердите,? что вы не робот|проверка браузера|^\s*(?:Forbidden|Access Denied|captcha)\s*$/im.test(text)) {
+      if (/^\/showcaptcha(?:\/|$)/.test(new URL(page.url()).pathname)
+          || /^(?:HTTP\s*)?[45]\d\d\b|forbidden|access denied|captcha|доступ.*(?:запрещен|ограничен)/i.test(title)
+          || /доступ к сайту[^\n]*(?:запрещен|ограничен)|подтвердите,? что вы не робот|^\s*вы\s+не\s+робот\?\s*$|проверка браузера|^\s*(?:Forbidden|Access Denied|captcha)\s*$/im.test(text)) {
         throw new Error(`${label}: blocked or challenge page`);
       }
     }
