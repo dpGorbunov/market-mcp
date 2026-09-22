@@ -56,6 +56,32 @@ try {
     await context.unrouteAll();
     return context.newPage();
   }
+  // WB uses direct transport unless MARKET_PROXY_SERVER is explicitly set.
+  const {readPublic} = await import('../src/wildberries.js');
+  const nativeRequest = https.request;
+  https.request = (url, options, callback) => nativeRequest(url, {...options, rejectUnauthorized:false}, callback);
+  const savedProxy = process.env.MARKET_PROXY_SERVER, savedHttps = process.env.HTTPS_PROXY;
+  try {
+    delete process.env.MARKET_PROXY_SERVER;
+    process.env.HTTPS_PROXY = savedProxy;
+    deny = true;
+    const ambientConnects = connects.length;
+    assert.equal((await readPublic(`https://${authority}/wb-direct`)).body, 'local proxy fixture');
+    assert.equal(connects.length, ambientConnects, 'WB inherited ambient HTTPS_PROXY');
+    process.env.MARKET_PROXY_SERVER = savedProxy;
+    deny = false;
+    assert.equal((await readPublic(`https://${authority}/wb-gateway`)).body, 'local proxy fixture');
+    assert(connects.length > ambientConnects, 'WB ignored explicitly configured CONNECT gateway');
+    deny = true;
+    const wbHits = hits;
+    await assert.rejects(readPublic(`https://${authority}/wb-denied`));
+    assert.equal(hits, wbHits, 'WB fell back to direct after gateway rejection');
+  } finally {
+    https.request = nativeRequest;
+    process.env.MARKET_PROXY_SERVER = savedProxy;
+    if (savedHttps === undefined) delete process.env.HTTPS_PROXY; else process.env.HTTPS_PROXY = savedHttps;
+    deny = false;
+  }
   const first = await page();
   await first.goto(`https://${authority}/success`);
   assert.equal(await first.textContent('body'), 'local proxy fixture');
