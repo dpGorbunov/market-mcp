@@ -94,6 +94,7 @@ async function launch() {
   hideEarly();
   context = await chromium.launchPersistentContext(PROFILE, {
     headless: HEADLESS,
+    ...(process.env.MARKET_PROXY_SERVER ? {proxy: {server: process.env.MARKET_PROXY_SERVER}} : {}),
     serviceWorkers: 'block',
     args: LAUNCH_ARGS,
     locale: "ru-RU",
