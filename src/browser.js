@@ -223,9 +223,18 @@ export async function openPage(url, { label = "page", waitUntil = "domcontentloa
   setWindowVisible(false);
   if (HIDE_WINDOW) await page.setViewportSize({ width: 1280, height: 860 });
   try {
-    await page.goto(url, { waitUntil, timeout: NAV_TIMEOUT_MS });
+    const response = await page.goto(url, { waitUntil, timeout: NAV_TIMEOUT_MS });
+    if (["dns", "yandex"].includes(site) && response && response.status() >= 400) throw new Error(`${label}: HTTP ${response.status()}`);
     await waitChallenge(page, label);
     if (settleMs) await page.waitForTimeout(settleMs);
+    if (["dns", "yandex"].includes(site)) {
+      const title = await page.title();
+      const text = await page.locator("body").innerText();
+      if (/^(?:HTTP\s*)?[45]\d\d\b|forbidden|access denied|captcha|доступ.*(?:запрещен|ограничен)/i.test(title)
+          || /доступ к сайту[^\n]*(?:запрещен|ограничен)|подтвердите,? что вы не робот|проверка браузера|^\s*(?:Forbidden|Access Denied|captcha)\s*$/im.test(text)) {
+        throw new Error(`${label}: blocked or challenge page`);
+      }
+    }
     return page;
   } catch (err) {
     await page.close().catch(() => {});
