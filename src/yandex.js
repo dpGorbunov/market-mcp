@@ -102,12 +102,25 @@ export function parseYandexCharacteristics(expectedId, root = document) {
   return {};
 }
 
+// The card's photo gallery: the thumbnail strip of its media viewer, each photo at full size ("/orig"), in the card's
+// order. A card with one photo has no strip, then its main picture. Pictures of related products elsewhere on the page
+// share the CDN and even the upload prefix, so only the viewer is read.
+export function parseYandexGallery(root = document) {
+  const full = (src) => {
+    const m = String(src || '').match(/^(https:\/\/avatars\.mds\.yandex\.net\/get-mpic\/\d+\/[\w-]+\/)/);
+    return m ? m[1] + 'orig' : null;
+  };
+  const pick = (selector) => [...new Set([...root.querySelectorAll(selector)].map((img) => full(img.getAttribute('src'))).filter(Boolean))];
+  const strip = pick('[data-auto="media-viewer-thumbnails"] [data-auto="thumbnail"] img');
+  return strip.length ? strip : pick('[data-auto="media-viewer-gallery"] img').slice(0, 1);
+}
+
 export async function yandexCard({ product }) {
   const url = cardUrl(product);
   const productId = url.split('/').at(-1);
   return withPage(url, "yandex-card", async (page) => {
     const title = await page.title();
-    const data = await page.evaluate(([helpersSrc, characteristicsSrc, productId]) => {
+    const data = await page.evaluate(([helpersSrc, characteristicsSrc, productId, gallerySrc]) => {
       const { norm, prices } = new Function(`return (${helpersSrc})()`)();
       const t = norm(document.body.innerText);
       const ps = prices(t);
@@ -124,10 +137,12 @@ export async function yandexCard({ product }) {
         noReviews: /Нет отзывов и оценок/.test(t),
         characteristics: chars,
         image: document.querySelector('meta[property="og:image"]')?.content || null,
+        images: new Function(`return (${gallerySrc})`)()(),
       };
-    }, [pageHelpers.toString(), parseYandexCharacteristics.toString(), productId]);
-    const { image, ...card } = data;
-    return withItemDimensions({ url: page.url(), name: title.replace(/ — купить.*$/, "").replace(/ от продавца.*$/, ""), ...card }, image);
+    }, [pageHelpers.toString(), parseYandexCharacteristics.toString(), productId, parseYandexGallery.toString()]);
+    const { image, images, ...card } = data;
+    const name = title.replace(/ — купить.*$/, "").replace(/ от продавца.*$/, "");
+    return withItemDimensions({ url: page.url(), name, ...card, images: images.length ? images : image ? [image] : [] }, images[0] || image);
   });
 }
 

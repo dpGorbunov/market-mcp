@@ -23,7 +23,7 @@ console.log('Yandex URL tests passed');
 
 const {readFileSync} = await import('node:fs');
 const {chromium} = await import('playwright');
-const {parseYandexCharacteristics} = await import('../src/yandex.js');
+const {parseYandexCharacteristics, parseYandexGallery} = await import('../src/yandex.js');
 // Disposable offline browser, never the persistent marketplace/user profile.
 const browser = await chromium.launch({headless: true});
 try {
@@ -40,6 +40,21 @@ try {
   await page.setContent('<h1>Стол 90 см</h1><div>Длина: 100 см</div><div>Акция: HardFest26</div>');
   assert.deepEqual(await parse('4671788663'), {});
   console.log('Yandex target-card fixture tests passed');
+  // The card's own gallery strip, full size, in order, once each; not the related products' pictures.
+  await page.setContent(readFileSync(new URL('../samples/yandex_card_gallery.html', import.meta.url), 'utf8'));
+  const gallery = () => page.evaluate(source => new Function(`return (${source})`)()(), parseYandexGallery.toString());
+  assert.deepEqual(await gallery(), [
+    'https://avatars.mds.yandex.net/get-mpic/5209485/2a000001967148fbe59a0ba92f7432f6c9e1/orig',
+    'https://avatars.mds.yandex.net/get-mpic/16055235/2a000001967148fbe573e08a0535963c052f/orig',
+    'https://avatars.mds.yandex.net/get-mpic/12363834/2a000001967148fbe5b1887a5000982f763c/orig',
+    'https://avatars.mds.yandex.net/get-mpic/15521812/2a000001967148fbe51e5ac8a7c5cb011f0d/orig',
+  ]);
+  // A card with one photo has no strip: its main picture is the gallery.
+  await page.setContent('<div data-auto="media-viewer-gallery"><img src="https://avatars.mds.yandex.net/get-mpic/1/2a00ab/450x600"></div>');
+  assert.deepEqual(await gallery(), ['https://avatars.mds.yandex.net/get-mpic/1/2a00ab/orig']);
+  await page.setContent('<h1>Нет фото</h1>');
+  assert.deepEqual(await gallery(), []);
+  console.log('Yandex gallery fixture tests passed');
 } finally {
   await browser.close();
 }
