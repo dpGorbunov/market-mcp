@@ -1,7 +1,7 @@
 // Яндекс.Маркет: поиск предложений (цены разных продавцов, рейтинг), карточка предложения, отзывы.
 // Отзывы висят не на всех карточках: у карточек-предложений продавцов "Нет отзывов и оценок", у карточек
 // модели они есть (страница <card>/reviews). Оценки отдельных отзывов в тексте страницы не выводятся.
-import { openPage, queued } from "./browser.js";
+import { openPage, queued, shareTarget } from "./browser.js";
 import { refine } from "./rank.js";
 import { productUrl } from "./urls.js";
 import { withItemDimensions } from "./dimensions.js";
@@ -116,7 +116,7 @@ export function parseYandexGallery(root = document) {
 }
 
 export async function yandexCard({ product }) {
-  const url = cardUrl(product);
+  const url = cardUrl(await shareTarget("yandex", product));
   const productId = url.split('/').at(-1);
   return withPage(url, "yandex-card", async (page) => {
     const title = await page.title();
@@ -200,7 +200,7 @@ export function parseYandexReviews(text, limit = 20, now = new Date()) {
  * отзывов на странице нет, поэтому maxScore здесь не работает.
  */
 export async function yandexReviews({ product, limit = 20, sinceMonths }) {
-  const url = cardUrl(product).replace(/\/+$/, "").replace(/\/reviews$/, "") + "/reviews";
+  const url = cardUrl(await shareTarget("yandex", product)).replace(/\/+$/, "").replace(/\/reviews$/, "") + "/reviews";
   return withPage(url, "yandex-reviews", async (page) => {
     for (let i = 0; i < 4; i++) { // отзывы догружаются при прокрутке
       await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));

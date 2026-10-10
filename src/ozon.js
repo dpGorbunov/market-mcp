@@ -1,5 +1,5 @@
 // High-level Ozon operations: build composer-api paths, fetch via the browser, parse to plain data.
-import { fetchJson, openPage, queued } from "./browser.js";
+import { fetchJson, openPage, queued, shareTarget } from "./browser.js";
 import { parseSearch, parseDetails, parseReviews, parseFilters, parseFullCharacteristics } from "./parse.js";
 import { refine } from "./rank.js";
 import { productUrl } from "./urls.js";
@@ -123,6 +123,7 @@ async function descriptionFromPage(path) {
  * страницы /features/ (composer) + описание из DOM карточки (description=false пропускает этот шаг, ~5 с).
  */
 export async function details({ product, description = true }) {
+  product = await shareTarget("ozon", product);
   const basePage = await fetchJson(productPath(product));
   const seo = basePage?.seo?.link?.[0]?.href;
   const path = seo ? productPath(seo) : productPath(product);
@@ -160,7 +161,7 @@ async function reviewsPage(path, sortKey, pageNo, links) {
  * что не старше sinceMonths месяцев и с оценкой не выше maxScore: "что ломается в свежих партиях".
  */
 export async function reviews({ product, sort = "newest", page = 1, limit = 30, sinceMonths, maxScore, maxPages = 5 }) {
-  const path = productPath(product);
+  const path = productPath(await shareTarget("ozon", product));
   if (sinceMonths == null && maxScore == null) {
     let links = [];
     if (page > 1) ({ links } = await reviewsPage(path, REVIEW_SORT[sort] || REVIEW_SORT.newest, 1));

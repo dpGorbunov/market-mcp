@@ -14,7 +14,7 @@ import { chromium } from "playwright";
 import { homedir } from "os";
 import { join } from "path";
 import { execFile } from "child_process";
-import { navigationSite, requestAllowed } from "./urls.js";
+import { navigationSite, productUrl, requestAllowed, shareLink } from "./urls.js";
 
 const OZON_HOME = "https://www.ozon.ru/";
 const OZON_API = "https://www.ozon.ru/api/composer-api.bx/page/json/v2?url=";
@@ -262,6 +262,44 @@ export async function openPage(url, { label = "page", waitUntil = "domcontentloa
   } catch (err) {
     await page.close().catch(() => {});
     throw err;
+  }
+}
+
+/**
+ * The card a share link leads to (ozon.ru/t/…, market.yandex.ru/cc/…), or the product itself when it is not one.
+ * The tab follows the redirects (the guard keeps every hop on the site's own hosts) until its address is a card;
+ * an anti-bot page shown at the card's address does not matter, only the address is read.
+ */
+export async function shareTarget(site, product) {
+  const share = shareLink(product);
+  if (!share) return product;
+  if (share.site !== site) throw new Error(`Invalid ${site === 'yandex' ? 'Yandex Market' : site} product URL`);
+  resetIdle();
+  // Ozon's anti-bot passes a fresh profile on the home page; a tab that lands on a card first keeps the challenge
+  // unsolved and the home page then fails it too (4 of 4 runs on the GPU host, 10.10)
+  if (site === "ozon") await queued("ozon", ensureOzon);
+  await ensureContext();
+  const page = await context.newPage();
+  pageSites.set(page, site);
+  await protectPage(context, page, pageSites);
+  setWindowVisible(false);
+  try {
+    return await followShare(page, share, CAPTCHA_WAIT_MS);
+  } finally {
+    await page.close().catch(() => {});
+  }
+}
+
+export async function followShare(page, share, waitMs) {
+  const deadline = Date.now() + waitMs;
+  await page.goto(share.url, { waitUntil: "commit", timeout: NAV_TIMEOUT_MS });
+  for (;;) {
+    try { return productUrl(share.site, page.url()); } catch { /* not at a card yet */ }
+    if (Date.now() > deadline) {
+      const stop = new URL(page.url());
+      throw new Error(`share link ${share.url} did not lead to a product card (stopped at ${stop.hostname}${stop.pathname.slice(0, 40)})`);
+    }
+    await page.waitForTimeout(250);
   }
 }
 
