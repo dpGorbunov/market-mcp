@@ -133,7 +133,7 @@ server.registerTool(
       product: z
         .string()
         .min(1)
-        .describe('Product SKU (e.g. "1185261285"), full ozon.ru product URL, or product slug'),
+        .describe('Product SKU (e.g. "1185261285"), full ozon.ru product URL, share link from the Ozon app (ozon.ru/t/...), or product slug'),
       description: z.boolean().default(true).describe("Load the description text/images from the product page (default true, ~5 s extra)"),
     },
     annotations: { readOnlyHint: true, openWorldHint: true, idempotentHint: true },
@@ -241,7 +241,7 @@ server.registerTool(
   {
     title: "Get Yandex Market offer card",
     description: "Offer card on Yandex Market: price, number of offers from other sellers and the lowest one, seller rating, characteristics.",
-    inputSchema: { product: z.string().min(1).describe("Offer URL from yandex_search (market.yandex.ru/card/...)") },
+    inputSchema: { product: z.string().min(1).describe("Offer URL from yandex_search (market.yandex.ru/card/...) or a share link from the Market app (market.yandex.ru/cc/...)") },
     annotations: { readOnlyHint: true, openWorldHint: true, idempotentHint: true },
   },
   tool("yandex_card", yandexCard)

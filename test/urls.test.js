@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {productUrl, productSite, requestAllowed} from '../src/urls.js';
+import {productUrl, productSite, requestAllowed, shareLink} from '../src/urls.js';
 import {compare} from '../src/compare.js';
 import {details, reviews} from '../src/ozon.js';
 import {dnsProduct, dnsReviews} from '../src/dns.js';
@@ -36,6 +36,18 @@ for (const product of [
   }
   await assert.rejects(compare({products: [good.yandex, product]}));
 }
+assert.deepEqual(shareLink('https://ozon.ru/t/cF6viV9'), {site: 'ozon', url: 'https://ozon.ru/t/cF6viV9'});
+assert.deepEqual(shareLink(' http://www.ozon.ru/t/cF6viV9/?utm=app '), {site: 'ozon', url: 'https://www.ozon.ru/t/cF6viV9/'});
+assert.deepEqual(shareLink('https://market.yandex.ru/cc/BGpXgU'), {site: 'yandex', url: 'https://market.yandex.ru/cc/BGpXgU'});
+assert.equal(productSite('https://ozon.ru/t/cF6viV9'), 'ozon');
+assert.equal(productSite('https://market.yandex.ru/cc/BGpXgU'), 'yandex');
+for (const link of ['https://evil.test/t/cF6viV9', 'https://ozon.ru.evil.test/t/cF6viV9', 'https://user@ozon.ru/t/cF6viV9',
+  'https://ozon.ru:8443/t/cF6viV9', 'https://ozon.ru/t/../product/1', 'https://ozon.ru/t/a', 'https://ozon.ru/cc/BGpXgU',
+  'https://market.yandex.ru/t/cF6viV9', 'https://dns-shop.ru/t/cF6viV9', 'ftp://ozon.ru/t/cF6viV9', good.ozon, 'cF6viV9']) {
+  assert.equal(shareLink(link), null, link);
+}
+for (const fn of [details, reviews]) await assert.rejects(fn({product: 'https://market.yandex.ru/cc/BGpXgU'}), /Invalid ozon product URL/);
+for (const fn of [yandexCard, yandexReviews]) await assert.rejects(fn({product: 'https://ozon.ru/t/cF6viV9'}), /Invalid Yandex Market product URL/);
 assert(requestAllowed(good.yandex, 'yandex', true));
 assert(!requestAllowed(good.ozon, 'yandex', true));
 assert(!requestAllowed('https://evil.test/x', 'yandex', true));
@@ -75,6 +87,24 @@ try {
   await assert.rejects(unscoped.goto(good.yandex));
   assert(!reached.includes(good.yandex));
   console.log('Browser redirects blocked before downstream request; CDN resources retained');
+
+  // a share link: the tab follows its redirects to the card and hands back the card's URL; a hop off the site is blocked
+  const {followShare} = await import('../src/browser.js');
+  await context.route('https://ozon.ru/t/**', route => route.request().url().endsWith('/nowhere')
+    ? route.fulfill({contentType: 'text/html', body: 'Antibot Captcha'})
+    : route.fulfill({status: 302, headers: {location: route.request().url().endsWith('/leak')
+      ? 'https://127.0.0.1/product/stol-1185261285/' : 'https://www.ozon.ru/product/stol-1185261285/?from=share'}}));
+  const tab = async () => {  // each share link gets its own tab, as in shareTarget
+    const page = await context.newPage();
+    scopes.set(page, 'ozon');
+    await protectPage(context, page, scopes);
+    return page;
+  };
+  assert.equal(await followShare(await tab(), {site: 'ozon', url: 'https://ozon.ru/t/cF6viV9'}, 2000), good.ozon);
+  await assert.rejects(followShare(await tab(), {site: 'ozon', url: 'https://ozon.ru/t/leak'}, 1000));
+  assert(!reached.some(url => url.includes('127.0.0.1')));
+  await assert.rejects(followShare(await tab(), {site: 'ozon', url: 'https://ozon.ru/t/nowhere'}, 1000), /did not lead to a product card/);
+  console.log('Share links followed to the card on the site only');
 } finally {
   await browser.close();
 }

@@ -49,8 +49,20 @@ export function productUrl(site, product) {
   return fail();
 }
 
+// Share links of the marketplace apps: redirects to a product card. Yandex Market answers plain HTTP clients on them with
+// a captcha, so a browser follows them (browser.js shareTarget); the card URL it lands on is checked by productUrl.
+const SHARE = {ozon: /^\/t\/[A-Za-z0-9_-]{3,32}\/?$/, yandex: /^\/cc\/[A-Za-z0-9_-]{3,32}\/?$/};
+export function shareLink(input) {
+  let url;
+  try { url = new URL(String(input || '').trim()); } catch { return null; }
+  if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || url.port) return null;
+  const site = Object.keys(SHARE).find(key => SITES[key].hosts.includes(url.hostname) && SHARE[key].test(url.pathname));
+  return site ? {site, url: `https://${url.hostname}${url.pathname}`} : null;
+}
 export function productSite(product) {
   const text = String(product || '').trim();
+  const share = shareLink(text);
+  if (share) return share.site;
   for (const site of ['dns', 'yandex', 'ozon']) {
     try { productUrl(site, text); return site; } catch { /* Try the next supported path/id format. */ }
   }
