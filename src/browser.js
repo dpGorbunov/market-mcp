@@ -24,6 +24,11 @@ const CAPTCHA_WAIT_MS = 1000 * Number(process.env.MARKET_CAPTCHA_WAIT_S || 120);
 const IDLE_TIMEOUT_MS = 60 * 1000 * Number(process.env.MARKET_IDLE_MIN || 720);
 const NAV_TIMEOUT_MS = 90000;
 const CHALLENGE_RELOAD_MS = 1000 * Number(process.env.MARKET_CHALLENGE_RELOAD_S || 15);
+// Yandex Market shows «Вы не робот?» to some page loads of a browser it lets through on the next one (GPU host 19.11:
+// 3-7 searches of 20; with two retries 39 of 40 passed): a page left on the anti-bot check is opened again in a new tab,
+// up to MARKET_CHALLENGE_RETRIES times, after a growing pause. 0 (default): wait for a person to solve the captcha.
+const CHALLENGE_RETRIES = Number(process.env.MARKET_CHALLENGE_RETRIES || 0);
+const CHALLENGE_PAUSE_MS = 1000 * Number(process.env.MARKET_CHALLENGE_PAUSE_S || 5);
 
 // Титулы страниц-заглушек антибота у всех площадок.
 const CHALLENGE = /antibot|доступ ограничен|нет соединения|captcha|проверка браузера|qrator|robot|вы\s+не\s+робот|attention required|access denied/i;
@@ -145,7 +150,7 @@ export async function waitChallenge(page, label) {
     await page.waitForTimeout(1000);
     title = await page.title().catch(() => "");
   }
-  if (CHALLENGE.test(title)) throw new Error(`${label}: challenge not passed in ${CAPTCHA_WAIT_MS / 1000}s (title: ${title.slice(0, 60)})`);
+  if (CHALLENGE.test(title)) throw challengeError(`${label}: challenge not passed in ${CAPTCHA_WAIT_MS / 1000}s (title: ${title.slice(0, 60)})`);
   if (warned) setWindowVisible(false);
   return title;
 }
@@ -222,11 +227,34 @@ async function fetchJsonNow(path, { retries = 2 } = {}) {
   }
 }
 
+function challengeError(message) {
+  return Object.assign(new Error(message), { challenge: true });
+}
+
+const captchaPage = (page) => /^\/showcaptcha(?:\/|$)/.test(new URL(page.url()).pathname);
+
+/** fn() again after an anti-bot page, up to retries times, pausing pauseMs, 2*pauseMs, ...; other errors go up at once. */
+export async function retryChallenge(fn, retries, pauseMs, label = "page") {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (!err?.challenge || attempt >= retries) throw err;
+      log(`${label}: anti-bot page, opening again (${attempt + 1}/${retries})`);
+      await new Promise((r) => setTimeout(r, pauseMs * (attempt + 1)));
+    }
+  }
+}
+
 /**
  * Открыть URL в новой вкладке общего профиля, дождаться прохождения антибота и отдать страницу.
  * Вызывающий обязан закрыть страницу (page.close()) в finally.
  */
-export async function openPage(url, { label = "page", waitUntil = "domcontentloaded", settleMs = 0 } = {}) {
+export function openPage(url, opts = {}) {
+  return retryChallenge(() => openPageOnce(url, opts), CHALLENGE_RETRIES, CHALLENGE_PAUSE_MS, opts.label);
+}
+
+async function openPageOnce(url, { label = "page", waitUntil = "domcontentloaded", settleMs = 0 } = {}) {
   const site = navigationSite(url);
   resetIdle();
   await ensureContext();
@@ -247,15 +275,17 @@ export async function openPage(url, { label = "page", waitUntil = "domcontentloa
       if (!reload) throw new Error(`${label}: HTTP ${response.status()}`);
       await page.waitForLoadState(waitUntil, { timeout: NAV_TIMEOUT_MS });
     }
+    // Yandex's captcha page is never passed without a person; with retries on, nobody is at the window to solve it
+    if (CHALLENGE_RETRIES && captchaPage(page)) throw challengeError(`${label}: challenge not passed (captcha page)`);
     await waitChallenge(page, label);
     if (settleMs) await page.waitForTimeout(settleMs);
     if (["dns", "yandex"].includes(site)) {
       const title = await page.title();
       const text = await page.locator("body").innerText();
-      if (/^\/showcaptcha(?:\/|$)/.test(new URL(page.url()).pathname)
+      if (captchaPage(page)
           || /^(?:HTTP\s*)?[45]\d\d\b|forbidden|access denied|captcha|доступ.*(?:запрещен|ограничен)/i.test(title)
           || /доступ к сайту[^\n]*(?:запрещен|ограничен)|подтвердите,? что вы не робот|^\s*вы\s+не\s+робот\?\s*$|проверка браузера|^\s*(?:Forbidden|Access Denied|captcha)\s*$/im.test(text)) {
-        throw new Error(`${label}: blocked or challenge page`);
+        throw challengeError(`${label}: blocked or challenge page`);
       }
     }
     return page;
