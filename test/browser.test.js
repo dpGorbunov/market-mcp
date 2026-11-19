@@ -73,3 +73,21 @@ assert.ok(launchArgs('linux', false).includes('--window-position=76,42'));
 assert.ok(launchArgs('darwin', true).includes('--window-position=20000,20000'), 'macOS hides the window off-screen');
 assert.ok(!launchArgs('darwin', false).some((a) => a.startsWith('--window-position')), 'visible macOS window keeps OS placement');
 console.log('launch window position passed');
+
+// A page left on the anti-bot check is opened again (Yandex Market shows «Вы не робот?» to some loads and lets the
+// next one through); any other failure goes up at once, and a check that stays is given up after the retries.
+const { retryChallenge } = await import('../src/browser.js');
+const challenge = () => Object.assign(new Error('yandex-search: challenge not passed in 20s'), { challenge: true });
+let tries = 0;
+assert.equal(await retryChallenge(async () => { if (tries++ < 2) throw challenge(); return 'page'; }, 2, 0), 'page');
+assert.equal(tries, 3, 'two fresh loads after two anti-bot pages');
+tries = 0;
+await assert.rejects(retryChallenge(async () => { tries++; throw challenge(); }, 2, 0), /challenge not passed/);
+assert.equal(tries, 3, 'gives up after the retries');
+tries = 0;
+await assert.rejects(retryChallenge(async () => { tries++; throw new Error('net::ERR_CONNECTION_RESET'); }, 2, 0), /ERR_CONNECTION/);
+assert.equal(tries, 1, 'other errors are not retried');
+tries = 0;
+await assert.rejects(retryChallenge(async () => { tries++; throw challenge(); }, 0, 0), /challenge/);
+assert.equal(tries, 1, 'no retries by default');
+console.log('anti-bot page retry passed');

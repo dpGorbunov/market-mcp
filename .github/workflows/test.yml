@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # ubuntu-latest is 26.04 now, Playwright 1.60 has no Chromium for it
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
